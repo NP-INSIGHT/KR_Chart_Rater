@@ -13,6 +13,14 @@ KST = timezone(timedelta(hours=9))
 logger = logging.getLogger("kr_chart_rater")
 
 
+def _to_uuid(id_str):
+    """32자 hex를 UUID 형식(하이픈 포함)으로 변환."""
+    s = id_str.replace("-", "").strip()
+    if len(s) == 32:
+        return f"{s[:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:]}"
+    return id_str
+
+
 class NotionSync:
     def __init__(self, token):
         self.client = Client(auth=token)
@@ -35,28 +43,24 @@ class NotionSync:
             list_name: 필터링할 리스트 이름 (multi-select "리스트" 속성).
                        None이면 전체 종목 반환.
         """
+        db_id = _to_uuid(db_id)
         names = []
         has_more = True
         start_cursor = None
 
         while has_more:
             self._throttle()
-            kwargs = {"database_id": db_id, "page_size": 100}
+            body = {"page_size": 100}
             if start_cursor:
-                kwargs["start_cursor"] = start_cursor
+                body["start_cursor"] = start_cursor
 
             # 리스트 필터 (multi-select "리스트" 속성)
             if list_name:
-                kwargs["filter"] = {
+                body["filter"] = {
                     "property": "리스트",
                     "multi_select": {"contains": list_name},
                 }
 
-            body = {"page_size": kwargs.get("page_size", 100)}
-            if "start_cursor" in kwargs and kwargs["start_cursor"]:
-                body["start_cursor"] = kwargs["start_cursor"]
-            if "filter" in kwargs:
-                body["filter"] = kwargs["filter"]
             resp = self.client.request(
                 path=f"databases/{db_id}/query",
                 method="POST",
@@ -84,6 +88,7 @@ class NotionSync:
 
     def create_report_page(self, db_id, title, date_str, summary_props, blocks):
         """보고서 DB에 새 페이지 생성."""
+        db_id = _to_uuid(db_id)
         self._throttle()
 
         properties = {
