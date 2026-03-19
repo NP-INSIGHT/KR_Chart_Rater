@@ -50,6 +50,8 @@ class NotionSync:
             json=body or {},
             timeout=30,
         )
+        if resp.status_code >= 400:
+            logger.error(f"Notion API 오류: {resp.status_code} {resp.text}")
         resp.raise_for_status()
         return resp.json()
 

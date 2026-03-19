@@ -59,7 +59,7 @@ def _run(list_name, provider, notion, dry_run, github_repo, log):
         # 1. 티커 해석 + 데이터 + 차트
         try:
             yf_ticker, code, market = engine.resolve_ticker(name)
-            df = engine.fetch_ohlcv(name)
+            df, _, _ = engine.fetch_ohlcv(name)
             chart_path = engine.generate_chart(name, df)
         except Exception as e:
             log(f"  [X] {name} 데이터/차트 오류: {e}")
