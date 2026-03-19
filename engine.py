@@ -578,9 +578,15 @@ def get_active_watchlist(list_name=None):
 
 def resolve_ticker(name):
     """
-    한글 종목명 → (yfinance 티커, 종목코드, 시장)
-    예: '삼성전자' → ('005930.KS', '005930', 'KOSPI')
+    종목명/티커 → (yfinance 티커, 종목코드, 시장)
+    한국: '삼성전자' → ('005930.KS', '005930', 'KOSPI')
+    미국: 'AAPL' → ('AAPL', 'AAPL', 'US')
     """
+    # 영문 대문자 + 숫자로만 구성되면 US 티커로 간주
+    stripped = name.strip().upper()
+    if stripped.isascii() and all(c.isalnum() or c in ".-" for c in stripped):
+        return stripped, stripped, "US"
+
     ticker_map = _build_ticker_map()
 
     if name not in ticker_map:
@@ -898,7 +904,7 @@ def _fetch_pykrx(code, period):
 # ============================================================
 # 캔들차트 생성
 # ============================================================
-def generate_chart(ticker_name, df, code=None):
+def generate_chart(ticker_name, df, code=None, market=None):
     """
     mplfinance로 캔들스틱 차트 생성 (MA + 거래량 포함).
     Returns: 저장된 이미지 경로 (Path)
@@ -929,9 +935,13 @@ def generate_chart(ticker_name, df, code=None):
     valid_ma = [m for m in CHART_MA_LINES if m < len(df)]
     valid_colors = ma_colors[:len(valid_ma)]
 
-    # 차트 스타일
+    # 차트 스타일: 시장에 따라 색상 전환
+    if market == "US":
+        up_color, down_color = "#26A69A", "#EF5350"  # 미국식: 초록/빨강
+    else:
+        up_color, down_color = "#FF3B30", "#007AFF"  # 한국식: 빨강/파랑
     mc = mpf.make_marketcolors(
-        up="#FF3B30", down="#007AFF",  # 한국식: 양봉 빨강, 음봉 파랑
+        up=up_color, down=down_color,
         edge="inherit",
         wick="inherit",
         volume="in",
