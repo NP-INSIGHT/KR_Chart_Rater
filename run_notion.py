@@ -69,7 +69,7 @@ def _run(list_name, provider, notion, dry_run, github_repo, log):
         # 2. LLM 분석 (1회 — 프롬프트 내부에서 3회 합의 수행)
         try:
             result = engine.analyze_chart_with_llm(
-                chart_path=str(chart_path),
+                chart_image_path=str(chart_path),
                 ticker_name=name,
                 provider=provider,
             )

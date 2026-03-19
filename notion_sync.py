@@ -55,6 +55,22 @@ class NotionSync:
         resp.raise_for_status()
         return resp.json()
 
+    def _get_db_schema(self, db_id):
+        """DB 속성 이름 목록 조회."""
+        self._throttle()
+        resp = httpx.get(
+            f"{NOTION_BASE}/databases/{db_id}",
+            headers=self._headers,
+            timeout=30,
+        )
+        if resp.status_code >= 400:
+            logger.warning(f"DB 스키마 조회 실패: {resp.status_code}")
+            return {}
+        data = resp.json()
+        schema = set(data.get("properties", {}).keys())
+        logger.info(f"DB 스키마: {schema}")
+        return schema
+
     # ── 종목 리스트 읽기 ──
 
     def read_watchlist(self, db_id, list_name=None):
@@ -107,29 +123,27 @@ class NotionSync:
         """보고서 DB에 새 페이지 생성."""
         db_id = _to_uuid(db_id)
 
+        # DB 스키마 조회 → 존재하는 속성만 사용
+        db_schema = self._get_db_schema(db_id)
+
         properties = {
             "날짜": {"title": [{"text": {"content": title}}]},
         }
 
-        # 선택적 속성 (DB에 있을 때만)
-        if "분석일" in summary_props:
-            properties["분석일"] = {"date": {"start": summary_props["분석일"]}}
-        if "종목수" in summary_props:
-            properties["종목수"] = {"number": summary_props["종목수"]}
-        if "선정" in summary_props:
-            properties["선정"] = {"number": summary_props["선정"]}
-        if "비용" in summary_props:
-            properties["비용"] = {"number": summary_props["비용"]}
+        # 속성이 DB에 존재할 때만 추가
+        prop_map = {
+            "분석일": lambda v: {"date": {"start": v}},
+            "종목수": lambda v: {"number": v},
+            "선정": lambda v: {"number": v},
+            "비용": lambda v: {"number": v},
+            "리스트": lambda v: {"rich_text": [{"text": {"content": str(v)}}]},
+            "A-1": lambda v: {"rich_text": [{"text": {"content": str(v)[:2000]}}]},
+            "A-2": lambda v: {"rich_text": [{"text": {"content": str(v)[:2000]}}]},
+        }
 
-        # 리스트명 (rich_text)
-        if "리스트" in summary_props:
-            properties["리스트"] = {"rich_text": [{"text": {"content": summary_props["리스트"]}}]}
-
-        # A-1 / A-2 종목 리스트 (rich_text, 추천 순)
-        if "A-1" in summary_props:
-            properties["A-1"] = {"rich_text": [{"text": {"content": summary_props["A-1"][:2000]}}]}
-        if "A-2" in summary_props:
-            properties["A-2"] = {"rich_text": [{"text": {"content": summary_props["A-2"][:2000]}}]}
+        for key, builder in prop_map.items():
+            if key in summary_props and key in db_schema:
+                properties[key] = builder(summary_props[key])
 
         # 페이지 생성 (최대 100 블록)
         first_blocks = blocks[:100]
