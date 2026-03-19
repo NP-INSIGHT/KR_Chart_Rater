@@ -1,16 +1,19 @@
 """
 KR Chart Rater - Notion API 래퍼
 Notion DB에서 종목 리스트 읽기 / 분석 보고서 쓰기
+httpx로 직접 Notion API 호출 (안정적인 API 버전 사용)
 """
 
 import time
 import logging
+import httpx
 from datetime import datetime, timezone, timedelta
-
-from notion_client import Client
 
 KST = timezone(timedelta(hours=9))
 logger = logging.getLogger("kr_chart_rater")
+
+NOTION_BASE = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
 
 
 def _to_uuid(id_str):
@@ -23,7 +26,12 @@ def _to_uuid(id_str):
 
 class NotionSync:
     def __init__(self, token):
-        self.client = Client(auth=token)
+        self._token = token
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": NOTION_VERSION,
+            "Content-Type": "application/json",
+        }
         self._last = 0
 
     def _throttle(self):
@@ -32,6 +40,18 @@ class NotionSync:
         if gap < 0.35:
             time.sleep(0.35 - gap)
         self._last = time.time()
+
+    def _post(self, path, body=None):
+        """Notion API POST 요청."""
+        self._throttle()
+        resp = httpx.post(
+            f"{NOTION_BASE}/{path}",
+            headers=self._headers,
+            json=body or {},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # ── 종목 리스트 읽기 ──
 
@@ -49,7 +69,6 @@ class NotionSync:
         start_cursor = None
 
         while has_more:
-            self._throttle()
             body = {"page_size": 100}
             if start_cursor:
                 body["start_cursor"] = start_cursor
@@ -61,11 +80,7 @@ class NotionSync:
                     "multi_select": {"contains": list_name},
                 }
 
-            resp = self.client.request(
-                path=f"databases/{db_id}/query",
-                method="POST",
-                body=body,
-            )
+            resp = self._post(f"databases/{db_id}/query", body)
             for page in resp.get("results", []):
                 props = page.get("properties", {})
 
@@ -89,7 +104,6 @@ class NotionSync:
     def create_report_page(self, db_id, title, date_str, summary_props, blocks):
         """보고서 DB에 새 페이지 생성."""
         db_id = _to_uuid(db_id)
-        self._throttle()
 
         properties = {
             "날짜": {"title": [{"text": {"content": title}}]},
@@ -119,20 +133,19 @@ class NotionSync:
         first_blocks = blocks[:100]
         remaining_blocks = blocks[100:]
 
-        page = self.client.pages.create(
-            parent={"database_id": db_id},
-            properties=properties,
-            children=first_blocks,
-        )
-
+        page_body = {
+            "parent": {"database_id": db_id},
+            "properties": properties,
+            "children": first_blocks,
+        }
+        page = self._post("pages", page_body)
         page_id = page["id"]
 
         # 100개 초과 블록은 append로 분할 추가
         while remaining_blocks:
-            self._throttle()
             batch = remaining_blocks[:100]
             remaining_blocks = remaining_blocks[100:]
-            self.client.blocks.children.append(block_id=page_id, children=batch)
+            self._post(f"blocks/{page_id}/children", {"children": batch})
 
         logger.info(f"Notion 보고서 페이지 생성: {title} (DB: {db_id[:8]}...)")
         return page_id
