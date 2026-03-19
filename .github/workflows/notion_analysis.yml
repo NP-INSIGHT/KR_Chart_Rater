@@ -38,7 +38,7 @@ jobs:
           sudo apt-get install -y fonts-nanum
           fc-cache -fv
 
-      - name: Run Notion analysis
+      - name: Run analysis (dry-run, no Notion write yet)
         env:
           MPLBACKEND: Agg
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -48,9 +48,29 @@ jobs:
           LIST="${{ inputs.list }}"
           PROVIDER="${{ inputs.provider || 'claude' }}"
           if [ -n "$LIST" ]; then
-            python run_notion.py --provider "$PROVIDER" --list "$LIST"
+            python run_notion.py --provider "$PROVIDER" --list "$LIST" --dry-run
           else
-            python run_notion.py --provider "$PROVIDER"
+            python run_notion.py --provider "$PROVIDER" --dry-run
+          fi
+
+      - name: Commit charts to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/
+          git diff --staged --quiet || git commit -m "chore: update charts $(date +%Y-%m-%d)"
+          git push
+
+      - name: Write Notion report (charts now available on GitHub)
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: |
+          LIST="${{ inputs.list }}"
+          PROVIDER="${{ inputs.provider || 'claude' }}"
+          if [ -n "$LIST" ]; then
+            python run_notion.py --provider "$PROVIDER" --list "$LIST" --report-only
+          else
+            python run_notion.py --provider "$PROVIDER" --report-only
           fi
 
       - name: Upload logs on failure
