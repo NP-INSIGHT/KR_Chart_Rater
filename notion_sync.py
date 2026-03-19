@@ -52,7 +52,16 @@ class NotionSync:
                     "multi_select": {"contains": list_name},
                 }
 
-            resp = self.client.databases.query(**kwargs)
+            body = {"page_size": kwargs.get("page_size", 100)}
+            if "start_cursor" in kwargs and kwargs["start_cursor"]:
+                body["start_cursor"] = kwargs["start_cursor"]
+            if "filter" in kwargs:
+                body["filter"] = kwargs["filter"]
+            resp = self.client.request(
+                path=f"databases/{db_id}/query",
+                method="POST",
+                body=body,
+            )
             for page in resp.get("results", []):
                 props = page.get("properties", {})
 
