@@ -1084,8 +1084,8 @@ def _parse_llm_response(raw_text):
     """LLM 응답에서 텍스트 기반 분석 결과 파싱 (v2 프롬프트)"""
     result = {"raw_response": raw_text, "parse_error": False}
 
-    # 1. 결론 (매력도): "결론: A-1", "결론 : A-2", "결론: 매력도 B" 등
-    m = re.search(r"결론\s*[:：]\s*(?:매력도\s*)?([A-Da-d]-?[12]?)\b", raw_text)
+    # 1. 결론 (매력도): "결론: A-1", "결론: **D (리스크)**", "## 결론: **A-2**" 등
+    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*)?([A-Da-d]-?[12]?)\b", raw_text)
     if m:
         grade_raw = m.group(1).upper()
         # "A1" → "A-1", "A2" → "A-2" 정규화
