@@ -7,7 +7,7 @@ LLM_PROVIDER=claude
 CLAUDE_MODEL=claude-sonnet-4-6
 
 # Gemini 모델 (gemini-2.5-flash / gemini-2.5-pro)
-GEMINI_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-3.1-pro-preview
 
 # 차트 설정
 CHART_PERIOD=1y

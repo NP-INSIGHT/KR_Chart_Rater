@@ -82,6 +82,9 @@ TOKEN_COST_RATES = {
     "claude-opus-4-6": {"input": 15.0, "output": 75.0},
     "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.0},
+    "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
+    "gemini-3.1-flash-lite-preview": {"input": 0.25, "output": 1.5},
 }
 
 
