@@ -1,0 +1,107 @@
+{
+  "version": 2,
+  "active_list": "전체 종목",
+  "lists": [
+    {
+      "name": "전체 종목",
+      "config": {
+        "provider": null,
+        "email_to": null,
+        "notion_watchlist_db": null,
+        "notion_report_db": null
+      },
+      "stocks": [
+        {
+          "name": "인텔리안테크",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "에이치브이엠",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "큐리언트",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "파두",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "리노공업",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "삼천당제약",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "비나텍",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "로킷헬스케어",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "스피어",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "앱클론",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "제이에스링크",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "오름테라퓨틱",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "온코닉테라퓨틱스",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "현대무벡스",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "케어젠",
+          "active": true,
+          "added": "2026-03-18"
+        },
+        {
+          "name": "한올바이오파마",
+          "active": true,
+          "added": "2026-03-18"
+        }
+      ]
+    },
+    {
+      "name": "BIO",
+      "config": {
+        "provider": null,
+        "email_to": null,
+        "notion_watchlist_db": null,
+        "notion_report_db": null
+      },
+      "stocks": []
+    }
+  ]
+}

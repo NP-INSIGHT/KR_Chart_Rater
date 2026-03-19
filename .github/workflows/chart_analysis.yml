@@ -1,0 +1,109 @@
+name: KR Chart Analysis
+
+on:
+  schedule:
+    # 매 평일 18:00 KST (09:00 UTC) - 장 마감 후
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '분석 모드'
+        required: true
+        default: 'themes'
+        type: choice
+        options:
+          - stocks
+          - themes
+      tickers:
+        description: '종목명 (쉼표 구분, stocks 모드용)'
+        required: false
+        default: ''
+      themes:
+        description: '테마명 (쉼표 구분, 또는 "all")'
+        required: false
+        default: 'all'
+      provider:
+        description: 'LLM provider'
+        required: false
+        default: 'claude'
+        type: choice
+        options:
+          - claude
+          - gemini
+      top_n:
+        description: 'ETF 보유종목 상위 N개'
+        required: false
+        default: '10'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Set up secrets
+        run: |
+          mkdir -p secrets
+          echo "${{ secrets.ANTHROPIC_API_KEY }}" > secrets/anthropic_api_key.txt
+          echo "${{ secrets.GEMINI_API_KEY }}" > secrets/gemini_api_key.txt
+
+      - name: Set matplotlib backend (headless)
+        run: echo "MPLBACKEND=Agg" >> $GITHUB_ENV
+
+      - name: Run analysis
+        run: |
+          MODE="${{ inputs.mode || 'themes' }}"
+          PROVIDER="${{ inputs.provider || 'claude' }}"
+          TOP_N="${{ inputs.top_n || '10' }}"
+
+          if [ "$MODE" = "stocks" ]; then
+            IFS=',' read -ra TICKERS <<< "${{ inputs.tickers }}"
+            python cli.py stocks --tickers "${TICKERS[@]}" --provider "$PROVIDER"
+          else
+            THEMES_INPUT="${{ inputs.themes || 'all' }}"
+            if [ "$THEMES_INPUT" = "all" ]; then
+              python cli.py themes --all --provider "$PROVIDER" --top-n "$TOP_N"
+            else
+              IFS=',' read -ra THEMES <<< "$THEMES_INPUT"
+              python cli.py themes --themes "${THEMES[@]}" --provider "$PROVIDER" --top-n "$TOP_N"
+            fi
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-results-${{ github.run_number }}
+          path: |
+            results/
+            charts/
+            logs/
+          retention-days: 30
+
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## KR Chart Rater 분석 결과" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **모드**: ${{ inputs.mode || 'themes' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **LLM**: ${{ inputs.provider || 'claude' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **실행 시각**: $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if ls results/*.json 1> /dev/null 2>&1; then
+            LATEST=$(ls -t results/*.json | head -1)
+            echo "### 최신 결과 파일: \`$(basename $LATEST)\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "결과 파일이 생성되지 않았습니다." >> $GITHUB_STEP_SUMMARY
+          fi

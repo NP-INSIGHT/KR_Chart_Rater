@@ -1,0 +1,200 @@
+"""
+KR Chart Rater - Notion API 래퍼
+Notion DB에서 종목 리스트 읽기 / 분석 보고서 쓰기
+"""
+
+import time
+import logging
+from datetime import datetime, timezone, timedelta
+
+from notion_client import Client
+
+KST = timezone(timedelta(hours=9))
+logger = logging.getLogger("kr_chart_rater")
+
+
+class NotionSync:
+    def __init__(self, token):
+        self.client = Client(auth=token)
+        self._last = 0
+
+    def _throttle(self):
+        """Notion rate limit: 3 req/sec"""
+        gap = time.time() - self._last
+        if gap < 0.35:
+            time.sleep(0.35 - gap)
+        self._last = time.time()
+
+    # ── 종목 리스트 읽기 ──
+
+    def read_watchlist(self, db_id, list_name=None):
+        """종목 리스트 DB에서 종목명 읽기 (페이지네이션 포함).
+
+        Args:
+            db_id: Notion 데이터베이스 ID
+            list_name: 필터링할 리스트 이름 (multi-select "리스트" 속성).
+                       None이면 전체 종목 반환.
+        """
+        names = []
+        has_more = True
+        start_cursor = None
+
+        while has_more:
+            self._throttle()
+            kwargs = {"database_id": db_id, "page_size": 100}
+            if start_cursor:
+                kwargs["start_cursor"] = start_cursor
+
+            # 리스트 필터 (multi-select "리스트" 속성)
+            if list_name:
+                kwargs["filter"] = {
+                    "property": "리스트",
+                    "multi_select": {"contains": list_name},
+                }
+
+            resp = self.client.databases.query(**kwargs)
+            for page in resp.get("results", []):
+                props = page.get("properties", {})
+
+                # "종목명" title 추출
+                title_prop = props.get("종목명", {})
+                if title_prop.get("type") == "title":
+                    titles = title_prop.get("title", [])
+                    if titles:
+                        name = titles[0].get("plain_text", "").strip()
+                        if name:
+                            names.append(name)
+
+            has_more = resp.get("has_more", False)
+            start_cursor = resp.get("next_cursor")
+
+        logger.info(f"Notion 종목 리스트 읽기: {len(names)}개 종목 (DB: {db_id[:8]}..., 리스트: {list_name or '전체'})")
+        return names
+
+    # ── 보고서 쓰기 ──
+
+    def create_report_page(self, db_id, title, date_str, summary_props, blocks):
+        """보고서 DB에 새 페이지 생성."""
+        self._throttle()
+
+        properties = {
+            "날짜": {"title": [{"text": {"content": title}}]},
+        }
+
+        # 선택적 속성 (DB에 있을 때만)
+        if "분석일" in summary_props:
+            properties["분석일"] = {"date": {"start": summary_props["분석일"]}}
+        if "종목수" in summary_props:
+            properties["종목수"] = {"number": summary_props["종목수"]}
+        if "선정" in summary_props:
+            properties["선정"] = {"number": summary_props["선정"]}
+        if "비용" in summary_props:
+            properties["비용"] = {"number": summary_props["비용"]}
+
+        # 리스트명 (rich_text)
+        if "리스트" in summary_props:
+            properties["리스트"] = {"rich_text": [{"text": {"content": summary_props["리스트"]}}]}
+
+        # A-1 / A-2 종목 리스트 (rich_text, 추천 순)
+        if "A-1" in summary_props:
+            properties["A-1"] = {"rich_text": [{"text": {"content": summary_props["A-1"][:2000]}}]}
+        if "A-2" in summary_props:
+            properties["A-2"] = {"rich_text": [{"text": {"content": summary_props["A-2"][:2000]}}]}
+
+        # 페이지 생성 (최대 100 블록)
+        first_blocks = blocks[:100]
+        remaining_blocks = blocks[100:]
+
+        page = self.client.pages.create(
+            parent={"database_id": db_id},
+            properties=properties,
+            children=first_blocks,
+        )
+
+        page_id = page["id"]
+
+        # 100개 초과 블록은 append로 분할 추가
+        while remaining_blocks:
+            self._throttle()
+            batch = remaining_blocks[:100]
+            remaining_blocks = remaining_blocks[100:]
+            self.client.blocks.children.append(block_id=page_id, children=batch)
+
+        logger.info(f"Notion 보고서 페이지 생성: {title} (DB: {db_id[:8]}...)")
+        return page_id
+
+    def build_report_blocks(self, a_results, meta, github_repo=None):
+        """A-1/A-2 종목 리스트를 간단한 Notion 블록으로 변환."""
+        blocks = []
+
+        total = meta.get("total_analyzed", 0)
+        selected = len(a_results)
+        provider = meta.get("provider", "")
+        cost = meta.get("cost_usd", 0)
+
+        blocks.append(self._callout(
+            f"분석 종목: {total}개 | 선정: {selected}개 | "
+            f"LLM: {provider.upper()} | 비용: ${cost:.4f}"
+        ))
+
+        if not a_results:
+            blocks.append(self._paragraph("A-1/A-2 선정 종목 없음"))
+            return blocks
+
+        # A-1 / A-2 분리
+        a1 = [r for r in a_results if r.get("grade") == "A-1"]
+        a2 = [r for r in a_results if r.get("grade") == "A-2"]
+
+        if a1:
+            blocks.append(self._heading3("A-1 (속도형 매력)"))
+            for idx, r in enumerate(a1, 1):
+                name = r.get("ticker_name", "")
+                code = r.get("code", "")
+                blocks.append(self._paragraph(f"{idx}. {name} ({code})"))
+
+        if a2:
+            blocks.append(self._heading3("A-2 (완만추세 지속형)"))
+            for idx, r in enumerate(a2, 1):
+                name = r.get("ticker_name", "")
+                code = r.get("code", "")
+                blocks.append(self._paragraph(f"{idx}. {name} ({code})"))
+
+        blocks.append(self._divider())
+        blocks.append(self._paragraph(
+            f"비용: ${cost:.4f} (약 {cost * 1400:.0f}원) | "
+            f"Generated by KR Chart Rater"
+        ))
+
+        return blocks
+
+    # ── Notion block 헬퍼 ──
+
+    @staticmethod
+    def _heading2(text):
+        return {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": text}}]}}
+
+    @staticmethod
+    def _heading3(text):
+        return {"type": "heading_3", "heading_3": {"rich_text": [{"type": "text", "text": {"content": text}}]}}
+
+    @staticmethod
+    def _paragraph(text):
+        # Notion rich_text content 최대 2000자
+        chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
+        return {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": c}} for c in chunks]}}
+
+    @staticmethod
+    def _bulleted(text):
+        return {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [{"type": "text", "text": {"content": text}}]}}
+
+    @staticmethod
+    def _divider():
+        return {"type": "divider", "divider": {}}
+
+    @staticmethod
+    def _callout(text):
+        return {"type": "callout", "callout": {"rich_text": [{"type": "text", "text": {"content": text}}], "icon": {"type": "emoji", "emoji": "\U0001f4ca"}}}
+
+    @staticmethod
+    def _image(url):
+        return {"type": "image", "image": {"type": "external", "external": {"url": url}}}

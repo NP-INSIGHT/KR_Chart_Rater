@@ -1,0 +1,10 @@
+secrets/
+charts/
+results/
+logs/
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec
+.env

@@ -1,0 +1,62 @@
+name: Notion Daily Analysis
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'   # UTC 07:00 = KST 16:00 (장 마감 30분 후)
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'LLM provider'
+        default: 'claude'
+        type: choice
+        options:
+          - claude
+          - gemini
+      list:
+        description: 'Filter by list name (empty = all stocks)'
+        required: false
+        default: ''
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Install Korean font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum
+          fc-cache -fv
+
+      - name: Run Notion analysis
+        env:
+          MPLBACKEND: Agg
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: |
+          LIST="${{ inputs.list }}"
+          PROVIDER="${{ inputs.provider || 'claude' }}"
+          if [ -n "$LIST" ]; then
+            python run_notion.py --provider "$PROVIDER" --list "$LIST"
+          else
+            python run_notion.py --provider "$PROVIDER"
+          fi
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7

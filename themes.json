@@ -1,0 +1,17 @@
+[
+  {"name": "2차전지", "description": "전기차 배터리 밸류체인 (양극재, 음극재, 전해질)"},
+  {"name": "반도체", "description": "반도체 제조, 장비, HBM, 파운드리"},
+  {"name": "AI/로봇", "description": "인공지능, 로봇 자동화, 자율주행"},
+  {"name": "바이오", "description": "바이오 신약, 헬스케어, 의료기기"},
+  {"name": "방산/우주", "description": "방위산업, 우주항공, 군수"},
+  {"name": "원전/에너지", "description": "원자력 발전, SMR, 에너지 전환"},
+  {"name": "조선/해운", "description": "조선, 해양플랜트, LNG선"},
+  {"name": "게임/엔터", "description": "게임, 엔터테인먼트, 미디어 콘텐츠"},
+  {"name": "코스피 대형주", "description": "KOSPI 200 대형주 지수 추종"},
+  {"name": "코스닥 성장주", "description": "KOSDAQ 150 성장주 지수 추종"},
+  {"name": "K-컬처", "description": "한류, K-POP, 드라마, 영화, 웹툰"},
+  {"name": "전력설비/인프라", "description": "전력기기, 변압기, 송배전, 스마트그리드"},
+  {"name": "자동차", "description": "완성차, 자동차 부품, 전기차"},
+  {"name": "금융", "description": "은행, 증권, 보험, 금융지주"},
+  {"name": "건설/인프라", "description": "건설, 시멘트, 인프라, 부동산"}
+]

@@ -1,0 +1,43 @@
+# KR Chart Rater 설정
+
+# LLM Provider: claude / gemini
+LLM_PROVIDER=claude
+
+# Claude 모델 (claude-sonnet-4-6 / claude-opus-4-6)
+CLAUDE_MODEL=claude-sonnet-4-6
+
+# Gemini 모델 (gemini-2.5-flash / gemini-2.5-pro)
+GEMINI_MODEL=gemini-2.5-pro
+
+# 차트 설정
+CHART_PERIOD=1y
+CHART_MA_LINES=5,20,60,120
+
+# ETF 설정
+ETF_TOP_N_HOLDINGS=10
+
+# 차트 이미지 보존 여부
+SAVE_CHARTS=true
+
+# 스케줄 자동 분석 설정
+# SCHEDULED_PROVIDER=claude
+
+# 이메일 보고서 설정 (run_scheduled.py에서 사용)
+# EMAIL_SMTP_HOST=smtp.gmail.com
+# EMAIL_SMTP_PORT=587
+# EMAIL_FROM=your-email@gmail.com
+# EMAIL_PASSWORD_FILE=email_password.txt
+# EMAIL_TO=recipient@example.com
+
+# Notion 연동 (워치리스트별 설정이 없을 때 기본값)
+ NOTION_WATCHLIST_DB= 3280f0d18c5a80f9a01ff29099882e1c
+ NOTION_REPORT_DB=3280f0d18c5a8041b28ed8be7b1e8f22
+
+# GitHub (차트 이미지 URL용, Notion image 블록에 사용)
+ GITHUB_REPO=NP-INSIGHT/KR_Chart_Rater
+
+# (v2) 외부 합의 제거됨 — 프롬프트 내부에서 3회 독립 분석 + 합의 수행
+# 아래 설정은 더 이상 사용되지 않음
+# CONSENSUS_RUNS=3
+# CONSENSUS_THRESHOLD=2
+# CONSENSUS_PROVIDER=claude
