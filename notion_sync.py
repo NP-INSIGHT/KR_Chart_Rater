@@ -184,10 +184,13 @@ class NotionSync:
         provider = meta.get("provider", "")
         cost = meta.get("cost_usd", 0)
 
+        data_basis = meta.get("data_basis", "")
         blocks.append(self._callout(
             f"분석 종목: {total}개 | 선정: {selected}개 | "
             f"LLM: {provider.upper()} | 비용: ${cost:.4f}"
         ))
+        if data_basis:
+            blocks.append(self._paragraph(data_basis))
 
         if not a_results:
             blocks.append(self._paragraph("A-1/A-2 선정 종목 없음"))

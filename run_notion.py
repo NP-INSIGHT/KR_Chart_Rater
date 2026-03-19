@@ -162,13 +162,19 @@ def _run_report(notion, github_repo, log):
 
     try:
         dt = datetime.now(engine.KST)
-        title = dt.strftime("%m/%d")
+        title = dt.strftime("%m/%d %H:%M")
+        # 15:30 이후면 당일 마감봉, 이전이면 전일 마감봉 기준
+        if dt.hour >= 16 or (dt.hour == 15 and dt.minute >= 30):
+            data_basis = f"데이터 기준: {dt.strftime('%Y-%m-%d')} 마감봉 (당일)"
+        else:
+            data_basis = f"데이터 기준: 직전 거래일 마감봉 (장중 미반영)"
         meta = {
             "total_analyzed": total_analyzed,
             "a_count": len(a_results),
             "errors": total_errors,
             "provider": provider,
             "cost_usd": cost,
+            "data_basis": data_basis,
         }
         summary_props = {
             "분석일": dt.strftime("%Y-%m-%d"),
