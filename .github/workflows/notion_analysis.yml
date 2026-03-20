@@ -7,7 +7,7 @@ on:
     inputs:
       provider:
         description: 'LLM provider'
-        default: 'claude'
+        default: 'gemini'
         type: choice
         options:
           - claude
