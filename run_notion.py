@@ -24,8 +24,15 @@ RESULTS_JSON = engine.BASE_DIR / "results" / "latest_results.json"
 
 
 def _format_stock_list(results):
-    """A-1 또는 A-2 결과를 '종목명(티커), ...' 형식으로 변환."""
-    return ", ".join(f"{r['ticker_name']}({r.get('code', '')})" for r in results)
+    """A-1 또는 A-2 결과를 '종목명(티커) 종가원, ...' 형식으로 변환."""
+    parts = []
+    for r in results:
+        price = r.get("last_close")
+        if price:
+            parts.append(f"{r['ticker_name']}({r.get('code', '')}) {price:,}원")
+        else:
+            parts.append(f"{r['ticker_name']}({r.get('code', '')})")
+    return ", ".join(parts)
 
 
 def _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name):
@@ -97,6 +104,7 @@ def _run_analysis(list_name, provider, notion, log):
             result["code"] = code
             result["market"] = market
             result["chart_path"] = str(chart_path)
+            result["last_close"] = int(df["Close"].iloc[-1])
 
             grade = result.get("grade", "N/A")
             reliability = result.get("reliability", "")
