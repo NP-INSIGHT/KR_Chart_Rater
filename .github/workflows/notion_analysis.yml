@@ -16,6 +16,10 @@ on:
         description: 'Filter by list name (empty = all stocks)'
         required: false
         default: ''
+      spreadsheet_only:
+        description: 'Spreadsheet only (skip analysis & Notion)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -54,6 +58,7 @@ jobs:
           fi
 
       - name: Run analysis (dry-run, no Notion write yet)
+        if: ${{ inputs.spreadsheet_only != true }}
         env:
           MPLBACKEND: Agg
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -69,12 +74,28 @@ jobs:
             python run_notion.py --provider "$PROVIDER" --dry-run
           fi
 
-      - name: Commit charts to repo
+      - name: Spreadsheet only (from saved results)
+        if: ${{ inputs.spreadsheet_only == true }}
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        run: python run_notion.py --spreadsheet-only
+
+      - name: Save results as artifact
+        if: ${{ inputs.spreadsheet_only != true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-results
+          path: results/latest_results.json
+          retention-days: 7
+
+      - name: Commit charts and results to repo
+        if: ${{ inputs.spreadsheet_only != true }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add charts/
-          git diff --staged --quiet || git commit -m "chore: update charts $(date +%Y-%m-%d)"
+          git add charts/ && git add -f results/latest_results.json
+          git diff --staged --quiet || git commit -m "chore: update charts and results $(date +%Y-%m-%d)"
           git pull --rebase origin main
           git push
 
