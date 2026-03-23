@@ -16,10 +16,6 @@ on:
         description: 'Filter by list name (empty = all stocks)'
         required: false
         default: ''
-      spreadsheet_only:
-        description: 'Spreadsheet only (skip analysis & Notion)'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -45,26 +41,12 @@ jobs:
           sudo apt-get install -y fonts-nanum
           fc-cache -fv
 
-      - name: Write Google service account credentials
-        env:
-          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: |
-          mkdir -p secrets
-          if [ -n "$GOOGLE_SA_JSON" ]; then
-            printf '%s' "$GOOGLE_SA_JSON" > secrets/google_service_account.json
-            echo "[SA] google_service_account.json written"
-          else
-            echo "[SA] GOOGLE_SERVICE_ACCOUNT_JSON secret not set, skipping"
-          fi
-
       - name: Run analysis (dry-run, no Notion write yet)
-        if: ${{ inputs.spreadsheet_only != true }}
         env:
           MPLBACKEND: Agg
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
           LIST="${{ inputs.list }}"
           PROVIDER="${{ inputs.provider || 'claude' }}"
@@ -74,28 +56,12 @@ jobs:
             python run_notion.py --provider "$PROVIDER" --dry-run
           fi
 
-      - name: Spreadsheet only (from saved results)
-        if: ${{ inputs.spreadsheet_only == true }}
-        env:
-          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-        run: python run_notion.py --spreadsheet-only
-
-      - name: Save results as artifact
-        if: ${{ inputs.spreadsheet_only != true }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: latest-results
-          path: results/latest_results.json
-          retention-days: 7
-
-      - name: Commit charts and results to repo
-        if: ${{ inputs.spreadsheet_only != true }}
+      - name: Commit charts to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add charts/ && git add -f results/latest_results.json
-          git diff --staged --quiet || git commit -m "chore: update charts and results $(date +%Y-%m-%d)"
+          git add charts/
+          git diff --staged --quiet || git commit -m "chore: update charts $(date +%Y-%m-%d)"
           git pull --rebase origin main
           git push
 

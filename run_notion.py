@@ -18,7 +18,6 @@ from pathlib import Path
 
 import engine
 from notion_sync import NotionSync
-from sheets_sync import create_performance_spreadsheet
 
 
 RESULTS_JSON = engine.BASE_DIR / "results" / "latest_results.json"
@@ -36,7 +35,7 @@ def _format_stock_list(results):
     return ", ".join(parts)
 
 
-def _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name, spreadsheet_url=None):
+def _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name):
     """분석 결과를 JSON으로 저장."""
     RESULTS_JSON.parent.mkdir(exist_ok=True)
     data = {
@@ -47,7 +46,6 @@ def _save_results(a_results, total_analyzed, total_errors, total_usage, provider
         "provider": provider,
         "list_name": list_name,
         "timestamp": datetime.now(engine.KST).isoformat(),
-        "spreadsheet_url": spreadsheet_url,
     }
     RESULTS_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -141,17 +139,7 @@ def _run_analysis(list_name, provider, notion, log):
         for i, r in enumerate(a_results, 1):
             log(f"  {i}. [{r.get('grade', '')}] {r['ticker_name']} ({r.get('code', '')})")
 
-    # Google Spreadsheet 생성
-    spreadsheet_url = None
-    try:
-        spreadsheet_url = create_performance_spreadsheet(a_results, datetime.now(engine.KST), log)
-        if spreadsheet_url:
-            log(f"\n[Spreadsheet] {spreadsheet_url}")
-    except Exception as e:
-        log(f"\n[Spreadsheet] 생성 실패 (스킵): {e}")
-
-    # 결과 JSON 저장 (spreadsheet_url 포함)
-    _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name, spreadsheet_url)
+    _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name)
     log(f"\n결과 저장: {RESULTS_JSON}")
 
 
@@ -205,8 +193,7 @@ def _run_report(notion, github_repo, log):
             "A-1": _format_stock_list(a1_results),
             "A-2": _format_stock_list(a2_results),
         }
-        spreadsheet_url = data.get("spreadsheet_url")
-        blocks = notion.build_report_blocks(a_results, meta, github_repo, spreadsheet_url=spreadsheet_url)
+        blocks = notion.build_report_blocks(a_results, meta, github_repo)
         notion.create_report_page(notion_rp_db, title, dt.strftime("%Y-%m-%d"), summary_props, blocks)
         log(f"Notion 보고서 작성 완료: {title}")
     except Exception as e:
@@ -231,10 +218,6 @@ def main():
         "--report-only", action="store_true",
         help="저장된 결과로 Notion 보고서만 작성 (분석 건너뜀)",
     )
-    parser.add_argument(
-        "--spreadsheet-only", action="store_true",
-        help="저장된 결과로 Google Spreadsheet만 생성 (분석/Notion 건너뜀)",
-    )
     args = parser.parse_args()
 
     provider = args.provider or engine.CONFIG.get("LLM_PROVIDER", engine.LLM_PROVIDER)
@@ -252,29 +235,7 @@ def main():
         log("NOTION_API_KEY 환경변수 또는 secrets/notion_api_key.txt를 확인하세요.")
         return 2
 
-    if args.spreadsheet_only:
-        # 저장된 결과로 스프레드시트만 생성
-        data = _load_results()
-        if not data:
-            log("[X] 저장된 분석 결과가 없습니다. 먼저 분석을 실행하세요.")
-            return 1
-        a_results = data["a_results"]
-        ts = datetime.fromisoformat(data["timestamp"])
-        log(f"저장된 결과 로드: {len(a_results)}개 종목 ({data['timestamp']})")
-        try:
-            url = create_performance_spreadsheet(a_results, ts, log)
-            if url:
-                log(f"[Spreadsheet] {url}")
-                # URL을 results JSON에도 업데이트
-                data["spreadsheet_url"] = url
-                RESULTS_JSON.write_text(
-                    __import__("json").dumps(data, ensure_ascii=False, indent=2),
-                    encoding="utf-8"
-                )
-        except Exception as e:
-            log(f"[Spreadsheet] 생성 실패: {e}")
-        return 0
-    elif args.report_only:
+    if args.report_only:
         # 보고서만 작성
         _run_report(notion, github_repo, log)
     elif args.dry_run:
