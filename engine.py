@@ -585,25 +585,23 @@ def resolve_ticker(name):
     한국: '삼성전자' → ('005930.KS', '005930', 'KOSPI')
     미국: 'AAPL' → ('AAPL', 'AAPL', 'US')
     """
-    # 영문 대문자 + 숫자로만 구성되면 US 티커로 간주
+    # 캐시를 먼저 확인 (SK·LS·GS 등 영문 한국 지주사 오판 방지)
+    ticker_map = _build_ticker_map()
+    if name in ticker_map:
+        code, market = ticker_map[name]
+        suffix = ".KS" if market == "KOSPI" else ".KQ"
+        return f"{code}{suffix}", code, market
+
+    # 캐시에 없고 ASCII 영숫자로만 구성되면 US 티커로 간주
     stripped = name.strip().upper()
     if stripped.isascii() and all(c.isalnum() or c in ".-" for c in stripped):
         return stripped, stripped, "US"
 
-    ticker_map = _build_ticker_map()
-
-    if name not in ticker_map:
-        # yfinance 검색 폴백
-        result = _search_yfinance(name)
-        if result:
-            return result
-        raise ValueError(f"종목을 찾을 수 없습니다: {name}")
-
-    code, market = ticker_map[name]
-    suffix = ".KS" if market == "KOSPI" else ".KQ"
-    yf_ticker = f"{code}{suffix}"
-
-    return yf_ticker, code, market
+    # yfinance 검색 폴백
+    result = _search_yfinance(name)
+    if result:
+        return result
+    raise ValueError(f"종목을 찾을 수 없습니다: {name}")
 
 
 def _search_yfinance(name):
