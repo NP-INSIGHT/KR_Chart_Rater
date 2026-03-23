@@ -59,6 +59,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
           LIST="${{ inputs.list }}"
           PROVIDER="${{ inputs.provider || 'claude' }}"

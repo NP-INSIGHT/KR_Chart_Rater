@@ -99,9 +99,21 @@ def create_performance_spreadsheet(a_results, analysis_date, log=None):
     gc = gspread.authorize(creds)
 
     # ── 스프레드시트 생성 ─────────────────────────────────────────
+    # GOOGLE_DRIVE_FOLDER_ID가 있으면 해당 폴더에 생성 (Drive 할당량 문제 해결)
+    import os
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID") or ""
+
+    # 환경변수 없으면 engine config에서 조회 시도
+    if not folder_id:
+        try:
+            import engine
+            folder_id = engine.CONFIG.get("GOOGLE_DRIVE_FOLDER_ID", "")
+        except Exception:
+            pass
+
     date_label = analysis_date.strftime("%Y-%m-%d")
     title = f"KR Chart Rater - {date_label}"
-    sh = gc.create(title)
+    sh = gc.create(title, folder_id=folder_id if folder_id else None)
     ws = sh.get_worksheet(0)
     ws.update_title("수익률 추적")
 
