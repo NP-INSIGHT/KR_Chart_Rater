@@ -42,10 +42,16 @@ jobs:
           fc-cache -fv
 
       - name: Write Google service account credentials
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           mkdir -p secrets
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > secrets/google_service_account.json
-        continue-on-error: true
+          if [ -n "$GOOGLE_SA_JSON" ]; then
+            printf '%s' "$GOOGLE_SA_JSON" > secrets/google_service_account.json
+            echo "[SA] google_service_account.json written"
+          else
+            echo "[SA] GOOGLE_SERVICE_ACCOUNT_JSON secret not set, skipping"
+          fi
 
       - name: Run analysis (dry-run, no Notion write yet)
         env:

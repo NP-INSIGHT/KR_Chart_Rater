@@ -72,7 +72,15 @@ def create_performance_spreadsheet(a_results, analysis_date, log=None):
             log(msg)
 
     if not _CREDS_PATH.exists():
-        _log(f"[Spreadsheet] secrets/google_service_account.json 없음 - 스프레드시트 생성 스킵")
+        _log("[Spreadsheet] secrets/google_service_account.json 없음 - 스프레드시트 생성 스킵")
+        return None
+
+    # JSON 유효성 사전 검증
+    import json as _json
+    try:
+        _json.loads(_CREDS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        _log("[Spreadsheet] google_service_account.json이 유효한 JSON이 아님 - 시크릿 값을 확인하세요")
         return None
 
     try:
@@ -231,8 +239,7 @@ def _apply_return_formatting(sh, ws, num_stock_rows, num_future_days):
             })
 
         # 조건부 서식 (batch_update)
-        sheet_id = ws._properties["sheetId"]
-        spreadsheet_id = sh.id
+        sheet_id = ws.id  # gspread 6.x: Worksheet.id = sheetId(gid)
         rules = []
 
         for col_idx in ret_col_indices:
