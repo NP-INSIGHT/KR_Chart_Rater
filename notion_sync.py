@@ -175,9 +175,13 @@ class NotionSync:
         filename = f"{ticker_name}_{date_str}.png"
         return f"https://raw.githubusercontent.com/{github_repo}/main/charts/{filename}"
 
-    def build_report_blocks(self, a_results, meta, github_repo=None):
+    def build_report_blocks(self, a_results, meta, github_repo=None, spreadsheet_url=None):
         """A-1/A-2 종목 리스트를 Notion 블록으로 변환 (차트 이미지 + 선정 근거 포함)."""
         blocks = []
+
+        # 스프레드시트 북마크를 최상단에 삽입
+        if spreadsheet_url:
+            blocks.append(self._bookmark(spreadsheet_url))
 
         total = meta.get("total_analyzed", 0)
         selected = len(a_results)
@@ -259,3 +263,7 @@ class NotionSync:
     @staticmethod
     def _image(url):
         return {"type": "image", "image": {"type": "external", "external": {"url": url}}}
+
+    @staticmethod
+    def _bookmark(url):
+        return {"type": "bookmark", "bookmark": {"url": url, "caption": []}}

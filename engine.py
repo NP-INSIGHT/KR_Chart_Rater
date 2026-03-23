@@ -931,8 +931,8 @@ def generate_chart(ticker_name, df, code=None, market=None):
     if code:
         title_str += f" ({code})"
 
-    # MA 색상: 5일(빨강), 20일(초록), 60일(파랑), 120일(보라)
-    ma_colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
+    # MA 색상: 5일(빨강), 20일(노랑), 60일(초록), 120일(회색)
+    ma_colors = ["#FF3333", "#FFD700", "#33CC33", "#888888"]
 
     # 유효한 MA만 사용 (데이터 길이보다 긴 MA는 제외)
     valid_ma = [m for m in CHART_MA_LINES if m < len(df)]
@@ -993,17 +993,27 @@ def load_chart_prompt():
     return prompt_path.read_text(encoding="utf-8")
 
 
-def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None):
+def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_close=None):
     """
     차트 이미지를 LLM 비전 모델에 보내 기술적 분석 수행.
+    last_close: 마지막 종가 (숫자). 제공 시 현재가 + 이평선 색상 설명을 user 메시지에 포함.
     Returns: 분석 결과 dict (grade, confidence, trend, signals, ...)
     """
     if provider is None:
         provider = LLM_PROVIDER
 
-    # 프롬프트 준비
-    prompt_template = load_chart_prompt()
-    prompt = prompt_template.replace("{ticker_name}", ticker_name)
+    # 시스템 프롬프트 준비
+    system_prompt = load_chart_prompt()
+
+    # 차트 설명 메시지 (이평선 색상은 generate_chart()의 ma_colors와 동기화)
+    # ma_colors = ["#FF3333", "#FFD700", "#33CC33", "#888888"] → 빨강/노랑/초록/회색
+    if last_close is not None:
+        user_msg = (
+            f"현재가: {int(last_close):,}원 부근. "
+            "빨간선=5일선, 노란선=20일선, 초록선=60일선, 회색선=120일선이야. 분석 시작해."
+        )
+    else:
+        user_msg = "빨간선=5일선, 노란선=20일선, 초록선=60일선, 회색선=120일선이야. 분석 시작해."
 
     # 이미지 읽기
     image_bytes = Path(chart_image_path).read_bytes()
@@ -1011,20 +1021,20 @@ def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None):
 
     # LLM 호출
     if provider == "claude":
-        raw_response, usage = _analyze_with_claude(image_b64, prompt)
+        raw_response, usage = _analyze_with_claude(image_b64, system_prompt, user_msg)
     elif provider == "gemini":
-        raw_response, usage = _analyze_with_gemini(image_b64, prompt)
+        raw_response, usage = _analyze_with_gemini(image_b64, system_prompt, user_msg)
     else:
         raise ValueError(f"지원하지 않는 LLM provider: {provider}")
 
-    # JSON 파싱
+    # 응답 파싱
     result = _parse_llm_response(raw_response)
     result["ticker_name"] = ticker_name
     result["token_usage"] = usage
     return result
 
 
-def _analyze_with_claude(image_b64, prompt):
+def _analyze_with_claude(image_b64, system_prompt, user_msg):
     """Claude 비전 API로 차트 분석. Returns: (text, usage_dict)"""
     import anthropic
 
@@ -1034,6 +1044,7 @@ def _analyze_with_claude(image_b64, prompt):
     response = client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=4096,
+        system=system_prompt,
         messages=[{
             "role": "user",
             "content": [
@@ -1047,7 +1058,7 @@ def _analyze_with_claude(image_b64, prompt):
                 },
                 {
                     "type": "text",
-                    "text": prompt,
+                    "text": user_msg,
                 },
             ],
         }],
@@ -1059,7 +1070,7 @@ def _analyze_with_claude(image_b64, prompt):
     return response.content[0].text, usage
 
 
-def _analyze_with_gemini(image_b64, prompt):
+def _analyze_with_gemini(image_b64, system_prompt, user_msg):
     """Gemini 비전 API로 차트 분석 (google.genai SDK). Returns: (text, usage_dict)"""
     from google import genai
     from google.genai import types
@@ -1073,7 +1084,8 @@ def _analyze_with_gemini(image_b64, prompt):
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[image_part, prompt],
+        config=types.GenerateContentConfig(system_instruction=system_prompt),
+        contents=[image_part, user_msg],
     )
 
     meta = response.usage_metadata
@@ -1084,14 +1096,22 @@ def _analyze_with_gemini(image_b64, prompt):
 
 
 def _parse_llm_response(raw_text):
-    """LLM 응답에서 텍스트 기반 분석 결과 파싱 (v2 프롬프트)"""
+    """LLM 응답에서 텍스트 기반 분석 결과 파싱 (v3 프롬프트 - Chain-of-Thought 형식)"""
     result = {"raw_response": raw_text, "parse_error": False}
 
-    # 1. 결론 (매력도): "결론: A-1", "결론: **D (리스크)**", "## 결론: **A-2**" 등
-    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*)?([A-Da-d]-?[12]?)\b", raw_text)
+    # <분析_추론> 블록 이후 최종 결과 섹션만 파싱 대상으로 사용
+    # 태그가 없으면 전체 텍스트를 대상으로 파싱
+    final_text = raw_text
+    cot_end = raw_text.find("</분析_추론>")
+    if cot_end == -1:
+        cot_end = raw_text.find("</분석_추론>")
+    if cot_end != -1:
+        final_text = raw_text[cot_end:]
+
+    # 1. 결론 (매력도): "■ 결론: A-1" 형식 (기존 "결론: A-1" 포맷도 호환)
+    m = re.search(r"(?:■\s*)?결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*분류\s*\([^)]*\)\s*)?([A-Da-d]-?[12]?)\b", final_text)
     if m:
         grade_raw = m.group(1).upper()
-        # "A1" → "A-1", "A2" → "A-2" 정규화
         if grade_raw in ("A1", "A2"):
             grade_raw = grade_raw[0] + "-" + grade_raw[1]
         result["grade"] = grade_raw
@@ -1100,39 +1120,56 @@ def _parse_llm_response(raw_text):
         result["parse_error"] = True
         logger.error(f"등급 파싱 실패. 원본 응답:\n{raw_text[:500]}")
 
-    # 2. 결론 일치 횟수: "3회 중 2회"
-    m = re.search(r"결론\s*일치\s*횟수\s*[:：]\s*(.+)", raw_text)
-    result["consensus_count"] = m.group(1).strip() if m else ""
+    # 2. 결론 일치 횟수: 신규 프롬프트에서 제거됨 → 빈 문자열 고정
+    result["consensus_count"] = ""
 
-    # 3. 신뢰도 등급: High/Medium/Low (한글도 대응)
-    m = re.search(r"신뢰도\s*등급\s*[:：]\s*(High|Medium|Low|높음|보통|낮음)", raw_text, re.IGNORECASE)
+    # 3. 신뢰도: "■ 신뢰도: 상/중/하" (기존 High/Medium/Low 포맷도 호환)
+    m = re.search(
+        r"(?:■\s*)?신뢰도\s*(?:등급\s*)?[:：]\s*(상|중|하|High|Medium|Low|높음|보통|낮음)",
+        final_text, re.IGNORECASE
+    )
     if m:
-        rel = m.group(1).capitalize()
-        # 한글 → 영문 변환
-        rel_map = {"높음": "High", "보통": "Medium", "낮음": "Low"}
-        result["reliability"] = rel_map.get(rel, rel)
+        rel_raw = m.group(1)
+        rel_map = {"상": "High", "중": "Medium", "하": "Low",
+                   "높음": "High", "보통": "Medium", "낮음": "Low",
+                   "high": "High", "medium": "Medium", "low": "Low"}
+        result["reliability"] = rel_map.get(rel_raw, rel_raw.capitalize())
     else:
         result["reliability"] = ""
 
-    # 4. 핵심 근거 (결론 블록 이후 ~ 현재가 or 끝)
+    # 4. 핵심 근거: "■ 핵심 근거:" 이후 ~ 다음 ■ 또는 끝
     m = re.search(
-        r"핵심\s*근거\s*[:：]?\s*\n?(.*?)(?=\n\s*\d+\.\s*현재가|\n\s*현재가\s*[:：]|\Z)",
-        raw_text, re.DOTALL
+        r"(?:■\s*)?핵심\s*근거\s*[:：]?\s*\n?(.*?)(?=\n\s*■|\n\s*\d+\.\s*현재|\Z)",
+        final_text, re.DOTALL
     )
     result["reasoning"] = m.group(1).strip() if m else ""
 
     # 5. A-1/A-2 전용 필드
     if result["grade"] in ("A-1", "A-2"):
-        m = re.search(r"현재가\s*[:：]\s*(.+)", raw_text)
+        # 현재 위치: "■ 현재 위치:" 형식 (기존 "현재가:" 포맷도 호환)
+        m = re.search(r"(?:■\s*)?현재\s*(?:위치|가)\s*[:：]\s*(.+)", final_text)
         result["current_price"] = m.group(1).strip() if m else ""
 
-        m = re.search(r"목표가\s*[:：]\s*(.+)", raw_text)
+        # 1차 목표가 (기존 "목표가:" 포맷도 호환)
+        m = re.search(r"1차\s*목표가\s*[:：]\s*(.+)", final_text)
+        if not m:
+            m = re.search(r"목표가\s*[:：]\s*(.+)", final_text)
         result["target_price"] = m.group(1).strip() if m else ""
 
-        m = re.search(r"매수\s*전략\s*[:：]\s*(.+)", raw_text)
+        # 2차 목표가
+        m = re.search(r"2차\s*목표가\s*[:：]\s*(.+)", final_text)
+        result["target_price_2"] = m.group(1).strip() if m else ""
+
+        # 진입 관점 (기존 "매수 전략:" 포맷도 호환)
+        m = re.search(r"진입\s*관점\s*[:：]\s*(.+)", final_text)
+        if not m:
+            m = re.search(r"매수\s*전략\s*[:：]\s*(.+)", final_text)
         result["buy_strategy"] = m.group(1).strip() if m else ""
 
-        m = re.search(r"매도\s*전략\s*[:：]\s*(.+)", raw_text)
+        # 관리(리스크) 기준 (기존 "매도 전략:" 포맷도 호환)
+        m = re.search(r"관리\s*\(리스크\)\s*기준\s*[:：]\s*(.+)", final_text)
+        if not m:
+            m = re.search(r"매도\s*전략\s*[:：]\s*(.+)", final_text)
         result["sell_strategy"] = m.group(1).strip() if m else ""
 
     # reliability → confidence 숫자 변환 (기존 정렬 로직 호환)
@@ -1194,7 +1231,8 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             # 4. LLM 분석
             log(f"  → LLM 분석 중 ({provider})...")
             start_time = time.time()
-            analysis = analyze_chart_with_llm(chart_path, name, provider)
+            last_close_val = int(df["Close"].iloc[-1])
+            analysis = analyze_chart_with_llm(chart_path, name, provider, last_close=last_close_val)
             elapsed = time.time() - start_time
             usage = analysis.get("token_usage", {})
             if usage:

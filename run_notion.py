@@ -18,6 +18,7 @@ from pathlib import Path
 
 import engine
 from notion_sync import NotionSync
+from sheets_sync import create_performance_spreadsheet
 
 
 RESULTS_JSON = engine.BASE_DIR / "results" / "latest_results.json"
@@ -35,7 +36,7 @@ def _format_stock_list(results):
     return ", ".join(parts)
 
 
-def _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name):
+def _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name, spreadsheet_url=None):
     """분석 결과를 JSON으로 저장."""
     RESULTS_JSON.parent.mkdir(exist_ok=True)
     data = {
@@ -46,6 +47,7 @@ def _save_results(a_results, total_analyzed, total_errors, total_usage, provider
         "provider": provider,
         "list_name": list_name,
         "timestamp": datetime.now(engine.KST).isoformat(),
+        "spreadsheet_url": spreadsheet_url,
     }
     RESULTS_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -100,6 +102,7 @@ def _run_analysis(list_name, provider, notion, log):
                 chart_image_path=str(chart_path),
                 ticker_name=name,
                 provider=provider,
+                last_close=int(df["Close"].iloc[-1]),
             )
             result["code"] = code
             result["market"] = market
@@ -138,8 +141,17 @@ def _run_analysis(list_name, provider, notion, log):
         for i, r in enumerate(a_results, 1):
             log(f"  {i}. [{r.get('grade', '')}] {r['ticker_name']} ({r.get('code', '')})")
 
-    # 결과 JSON 저장
-    _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name)
+    # Google Spreadsheet 생성
+    spreadsheet_url = None
+    try:
+        spreadsheet_url = create_performance_spreadsheet(a_results, datetime.now(engine.KST), log)
+        if spreadsheet_url:
+            log(f"\n[Spreadsheet] {spreadsheet_url}")
+    except Exception as e:
+        log(f"\n[Spreadsheet] 생성 실패 (스킵): {e}")
+
+    # 결과 JSON 저장 (spreadsheet_url 포함)
+    _save_results(a_results, total_analyzed, total_errors, total_usage, provider, list_name, spreadsheet_url)
     log(f"\n결과 저장: {RESULTS_JSON}")
 
 
@@ -193,7 +205,8 @@ def _run_report(notion, github_repo, log):
             "A-1": _format_stock_list(a1_results),
             "A-2": _format_stock_list(a2_results),
         }
-        blocks = notion.build_report_blocks(a_results, meta, github_repo)
+        spreadsheet_url = data.get("spreadsheet_url")
+        blocks = notion.build_report_blocks(a_results, meta, github_repo, spreadsheet_url=spreadsheet_url)
         notion.create_report_page(notion_rp_db, title, dt.strftime("%Y-%m-%d"), summary_props, blocks)
         log(f"Notion 보고서 작성 완료: {title}")
     except Exception as e:
