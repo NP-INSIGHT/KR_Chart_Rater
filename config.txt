@@ -30,11 +30,11 @@ SAVE_CHARTS=true
 # EMAIL_TO=recipient@example.com
 
 # Notion 연동 (워치리스트별 설정이 없을 때 기본값)
- NOTION_WATCHLIST_DB= 3280f0d18c5a80f9a01ff29099882e1c
- NOTION_REPORT_DB=3280f0d18c5a8041b28ed8be7b1e8f22
+NOTION_WATCHLIST_DB=3280f0d18c5a80f9a01ff29099882e1c
+NOTION_REPORT_DB=3280f0d18c5a8041b28ed8be7b1e8f22
 
 # GitHub (차트 이미지 URL용, Notion image 블록에 사용)
- GITHUB_REPO=NP-INSIGHT/KR_Chart_Rater
+GITHUB_REPO=NP-INSIGHT/KR_Chart_Rater
 
 # (v2) 외부 합의 제거됨 — 프롬프트 내부에서 3회 독립 분석 + 합의 수행
 # 아래 설정은 더 이상 사용되지 않음
