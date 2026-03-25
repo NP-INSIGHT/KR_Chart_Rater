@@ -1061,6 +1061,7 @@ def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_cl
 CONSENSUS_RUNS = int(CONFIG.get("CONSENSUS_RUNS", "3"))
 CONFIDENCE_THRESHOLD = int(CONFIG.get("CONFIDENCE_THRESHOLD", "70"))
 MIN_CONSENSUS_AGREEMENT = int(CONFIG.get("MIN_CONSENSUS_AGREEMENT", "2"))
+LLM_TEMPERATURE = float(CONFIG.get("LLM_TEMPERATURE", "1.0"))
 
 
 def analyze_with_consensus(chart_image_path, ticker_name, provider=None, last_close=None, n_runs=None):
@@ -1158,6 +1159,7 @@ def _analyze_with_claude(image_b64, system_prompt, user_msg):
     response = client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=4096,
+        temperature=LLM_TEMPERATURE,
         system=system_prompt,
         messages=[{
             "role": "user",
@@ -1198,7 +1200,7 @@ def _analyze_with_gemini(image_b64, system_prompt, user_msg):
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        config=types.GenerateContentConfig(system_instruction=system_prompt),
+        config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=LLM_TEMPERATURE),
         contents=[image_part, user_msg],
     )
 
