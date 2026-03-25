@@ -1081,11 +1081,14 @@ def analyze_with_consensus(chart_image_path, ticker_name, provider=None, last_cl
         try:
             result = analyze_chart_with_llm(chart_image_path, ticker_name, provider, last_close)
             runs.append(result)
+            grade = result.get("grade", "N/A")
+            conf = result.get("confidence", 0)
+            logger.info(f"  [run {i+1}/{n_runs}] {grade} (확신도: {conf}%)")
             usage = result.get("token_usage", {})
             for key in accumulated_usage:
                 accumulated_usage[key] += usage.get(key, 0)
         except Exception as e:
-            logger.warning(f"  합의 분석 run {i+1}/{n_runs} 실패: {e}")
+            logger.warning(f"  [run {i+1}/{n_runs}] 실패: {e}")
 
     if len(runs) < 2:
         if runs:
