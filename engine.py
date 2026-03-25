@@ -1124,9 +1124,11 @@ def analyze_with_consensus(chart_image_path, ticker_name, provider=None, last_cl
     agreement = grade_counts[consensus_grade]
     consensus_count = f"{agreement}/{len(runs)}"
 
-    # 합의 등급에 해당하는 run들의 평균 confidence
+    # 합의 등급에 해당하는 run들의 평균 confidence × 일치 비율
     consensus_confs = [r.get("confidence", 0) for r in runs if r.get("grade") == consensus_grade]
-    consensus_confidence = round(sum(consensus_confs) / len(consensus_confs)) if consensus_confs else 0
+    avg_confidence = sum(consensus_confs) / len(consensus_confs) if consensus_confs else 0
+    agreement_ratio = agreement / len(runs)  # 2/3=0.67, 3/3=1.0
+    consensus_confidence = round(avg_confidence * agreement_ratio)
 
     # 대표 결과 선택: 합의 등급 중 confidence가 가장 높은 run
     best_run = max(
