@@ -113,7 +113,7 @@ def _accumulate_usage(accumulated, new_usage):
     accumulated["input_cost_usd"] += new_usage["input_cost_usd"]
     accumulated["output_cost_usd"] += new_usage["output_cost_usd"]
     accumulated["total_cost_usd"] += new_usage["total_cost_usd"]
-    accumulated["api_calls"] += 1
+    accumulated["api_calls"] += new_usage.get("api_calls", 1)
 
 
 # ============================================================
@@ -284,7 +284,7 @@ def refresh_ticker_cache():
         params = {"method": "download", "marketType": market_type}
 
         try:
-            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp = requests.get(url, params=params, headers=headers)
             content = resp.content.decode("euc-kr", errors="replace")
 
             import pandas as pd
@@ -991,6 +991,31 @@ def load_chart_prompt():
     return prompt_path.read_text(encoding="utf-8")
 
 
+def _call_with_retry(fn, *args, max_retries=3, **kwargs):
+    """API 호출을 지수 백오프로 재시도. 일시적 네트워크/서버 오류만 재시도."""
+    for attempt in range(max_retries):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            err_name = type(e).__name__
+            # 재시도 가능한 오류: 네트워크, 서버 5xx, rate limit
+            retryable = any(kw in err_name.lower() for kw in
+                           ["connection", "timeout", "server", "rate", "overloaded"])
+            if not retryable:
+                # 응답 status code 확인 (httpx, requests 등)
+                status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+                if status and status >= 500:
+                    retryable = True
+                elif status == 429:
+                    retryable = True
+            if retryable and attempt < max_retries - 1:
+                wait = 2 ** attempt * 5  # 5s, 10s, 20s
+                logger.warning(f"API call failed ({err_name}, attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
+
+
 def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_close=None):
     """
     차트 이미지를 LLM 비전 모델에 보내 기술적 분석 수행.
@@ -1017,11 +1042,11 @@ def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_cl
     image_bytes = Path(chart_image_path).read_bytes()
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    # LLM 호출
+    # LLM 호출 (retry 적용)
     if provider == "claude":
-        raw_response, usage = _analyze_with_claude(image_b64, system_prompt, user_msg)
+        raw_response, usage = _call_with_retry(_analyze_with_claude, image_b64, system_prompt, user_msg)
     elif provider == "gemini":
-        raw_response, usage = _analyze_with_gemini(image_b64, system_prompt, user_msg)
+        raw_response, usage = _call_with_retry(_analyze_with_gemini, image_b64, system_prompt, user_msg)
     else:
         raise ValueError(f"지원하지 않는 LLM provider: {provider}")
 
@@ -1030,6 +1055,92 @@ def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_cl
     result["ticker_name"] = ticker_name
     result["token_usage"] = usage
     return result
+
+
+# 합의 설정
+CONSENSUS_RUNS = int(CONFIG.get("CONSENSUS_RUNS", "3"))
+CONFIDENCE_THRESHOLD = int(CONFIG.get("CONFIDENCE_THRESHOLD", "70"))
+MIN_CONSENSUS_AGREEMENT = int(CONFIG.get("MIN_CONSENSUS_AGREEMENT", "2"))
+
+
+def analyze_with_consensus(chart_image_path, ticker_name, provider=None, last_close=None, n_runs=None):
+    """
+    동일 차트를 N번 독립 분석하여 합의된 결과만 반환.
+    Returns: 합의 결과 dict (consensus_grade, consensus_confidence, consensus_count 등 포함)
+    """
+    if n_runs is None:
+        n_runs = CONSENSUS_RUNS
+
+    runs = []
+    accumulated_usage = {
+        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+        "input_cost_usd": 0.0, "output_cost_usd": 0.0, "total_cost_usd": 0.0,
+    }
+
+    for i in range(n_runs):
+        try:
+            result = analyze_chart_with_llm(chart_image_path, ticker_name, provider, last_close)
+            runs.append(result)
+            usage = result.get("token_usage", {})
+            for key in accumulated_usage:
+                accumulated_usage[key] += usage.get(key, 0)
+        except Exception as e:
+            logger.warning(f"  합의 분석 run {i+1}/{n_runs} 실패: {e}")
+
+    if len(runs) < 2:
+        if runs:
+            # 1회만 성공: 그대로 반환하되 합의 메타 추가
+            result = runs[0]
+            result["consensus_count"] = f"1/{n_runs}"
+            result["consensus_confidence"] = result.get("confidence", 0)
+            result["grade_distribution"] = {result.get("grade", "N/A"): 1}
+            result["token_usage"] = accumulated_usage
+            result["token_usage"]["api_calls"] = len(runs)
+            return result
+        raise RuntimeError(f"{ticker_name}: 합의 분석 {n_runs}회 중 성공 2회 미만")
+
+    # 등급별 투표 집계
+    from collections import Counter
+    grade_counts = Counter(r.get("grade", "N/A") for r in runs)
+    grade_distribution = dict(grade_counts)
+
+    # 최다 등급 결정 (동점이면 평균 confidence가 높은 쪽)
+    max_count = max(grade_counts.values())
+    top_grades = [g for g, c in grade_counts.items() if c == max_count]
+
+    if len(top_grades) == 1:
+        consensus_grade = top_grades[0]
+    else:
+        # 동점: 각 등급별 평균 confidence로 결정
+        grade_avg_conf = {}
+        for g in top_grades:
+            confs = [r.get("confidence", 0) for r in runs if r.get("grade") == g]
+            grade_avg_conf[g] = sum(confs) / len(confs) if confs else 0
+        consensus_grade = max(grade_avg_conf, key=grade_avg_conf.get)
+
+    agreement = grade_counts[consensus_grade]
+    consensus_count = f"{agreement}/{len(runs)}"
+
+    # 합의 등급에 해당하는 run들의 평균 confidence
+    consensus_confs = [r.get("confidence", 0) for r in runs if r.get("grade") == consensus_grade]
+    consensus_confidence = round(sum(consensus_confs) / len(consensus_confs)) if consensus_confs else 0
+
+    # 대표 결과 선택: 합의 등급 중 confidence가 가장 높은 run
+    best_run = max(
+        [r for r in runs if r.get("grade") == consensus_grade],
+        key=lambda r: r.get("confidence", 0)
+    )
+
+    # 합의 메타데이터 추가
+    best_run["grade"] = consensus_grade
+    best_run["confidence"] = consensus_confidence
+    best_run["consensus_confidence"] = consensus_confidence
+    best_run["consensus_count"] = consensus_count
+    best_run["grade_distribution"] = grade_distribution
+    best_run["token_usage"] = accumulated_usage
+    best_run["token_usage"]["api_calls"] = len(runs)
+
+    return best_run
 
 
 def _analyze_with_claude(image_b64, system_prompt, user_msg):
@@ -1121,19 +1232,34 @@ def _parse_llm_response(raw_text):
     # 2. 결론 일치 횟수: 신규 프롬프트에서 제거됨 → 빈 문자열 고정
     result["consensus_count"] = ""
 
-    # 3. 신뢰도: "■ 신뢰도: 상/중/하" (기존 High/Medium/Low 포맷도 호환)
-    m = re.search(
-        r"(?:■\s*)?신뢰도\s*(?:등급\s*)?[:：]\s*(상|중|하|High|Medium|Low|높음|보통|낮음)",
-        final_text, re.IGNORECASE
-    )
-    if m:
-        rel_raw = m.group(1)
-        rel_map = {"상": "High", "중": "Medium", "하": "Low",
-                   "높음": "High", "보통": "Medium", "낮음": "Low",
-                   "high": "High", "medium": "Medium", "low": "Low"}
-        result["reliability"] = rel_map.get(rel_raw, rel_raw.capitalize())
+    # 3. 신뢰도: 숫자 % 우선 파싱, 기존 상/중/하 폴백
+    m_pct = re.search(r"(?:■\s*)?신뢰도\s*[:：]\s*(\d{1,3})\s*%", final_text)
+    if m_pct:
+        result["confidence"] = min(int(m_pct.group(1)), 100)
+        pct = result["confidence"]
+        result["reliability"] = "High" if pct >= 80 else "Medium" if pct >= 60 else "Low"
     else:
-        result["reliability"] = ""
+        m = re.search(
+            r"(?:■\s*)?신뢰도\s*(?:등급\s*)?[:：]\s*(상|중|하|High|Medium|Low|높음|보통|낮음)",
+            final_text, re.IGNORECASE
+        )
+        if m:
+            rel_raw = m.group(1)
+            rel_map = {"상": "High", "중": "Medium", "하": "Low",
+                       "높음": "High", "보통": "Medium", "낮음": "Low",
+                       "high": "High", "medium": "Medium", "low": "Low"}
+            result["reliability"] = rel_map.get(rel_raw, rel_raw.capitalize())
+        else:
+            result["reliability"] = ""
+
+    # 3-1. 등급 확률: "■ 등급 확률: A-1 70% / A-2 30%"
+    m_prob = re.search(r"(?:■\s*)?등급\s*확률\s*[:：]\s*(.+)", final_text)
+    if m_prob:
+        prob_text = m_prob.group(1)
+        probs = re.findall(r"([A-Da-d]-?[12]?)\s+(\d{1,3})%", prob_text)
+        result["grade_probabilities"] = {g.upper(): int(p) for g, p in probs}
+    else:
+        result["grade_probabilities"] = {}
 
     # 4. 핵심 근거: "■ 핵심 근거:" 이후 ~ 다음 ■ 또는 끝
     m = re.search(
@@ -1170,9 +1296,10 @@ def _parse_llm_response(raw_text):
             m = re.search(r"매도\s*전략\s*[:：]\s*(.+)", final_text)
         result["sell_strategy"] = m.group(1).strip() if m else ""
 
-    # reliability → confidence 숫자 변환 (기존 정렬 로직 호환)
-    confidence_map = {"High": 90, "Medium": 70, "Low": 50}
-    result["confidence"] = confidence_map.get(result.get("reliability", ""), 0)
+    # reliability → confidence 숫자 변환 (숫자 % 파싱이 안 된 경우에만 폴백)
+    if "confidence" not in result:
+        confidence_map = {"High": 90, "Medium": 70, "Low": 50}
+        result["confidence"] = confidence_map.get(result.get("reliability", ""), 0)
 
     return result
 
@@ -1226,35 +1353,29 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             chart_path = generate_chart(name, df, code)
             log(f"  [차트] {chart_path.name}")
 
-            # 4. LLM 분석
-            log(f"  → LLM 분석 중 ({provider})...")
+            # 4. LLM 합의 분석
+            log(f"  → LLM 합의 분석 중 ({provider}, {CONSENSUS_RUNS}회)...")
             start_time = time.time()
             last_close_val = int(df["Close"].iloc[-1])
-            analysis = analyze_chart_with_llm(chart_path, name, provider, last_close=last_close_val)
+            analysis = analyze_with_consensus(chart_path, name, provider, last_close=last_close_val)
             elapsed = time.time() - start_time
             usage = analysis.get("token_usage", {})
+            conf = analysis.get("consensus_confidence", analysis.get("confidence", 0))
+            consensus_count = analysis.get("consensus_count", "")
+            grade_dist = analysis.get("grade_distribution", {})
+            dist_str = " / ".join(f"{g}:{c}" for g, c in sorted(grade_dist.items()))
             if usage:
                 cost_usd = usage["total_cost_usd"]
                 cost_krw = cost_usd * 1400
-                cost_str = f" | 토큰: {usage.get('total_tokens', 0):,} | ${cost_usd:.4f} ({cost_krw:.0f}원)"
+                cost_str = f" | ${cost_usd:.4f} ({cost_krw:.0f}원)"
             else:
                 cost_str = ""
-            log(f"  [분석] 등급: {analysis.get('grade', 'N/A')} | 신뢰도: {analysis.get('confidence', 0)}% ({elapsed:.1f}s){cost_str}")
+            log(f"  [분석] {analysis.get('grade', 'N/A')} | 확신도: {conf}% | {consensus_count} | 분포: {dist_str}{cost_str}")
             if usage:
                 _accumulate_usage(total_usage, usage)
                 cum_usd = total_usage["total_cost_usd"]
                 cum_krw = cum_usd * 1400
                 log(f"  [누적 비용] ${cum_usd:.4f} ({cum_krw:.0f}원)")
-
-            # 파싱 실패 시 1회 재시도
-            if analysis.get("parse_error"):
-                log(f"  [!] JSON 파싱 실패, 재시도 중...")
-                analysis = analyze_chart_with_llm(chart_path, name, provider)
-                retry_usage = analysis.get("token_usage", {})
-                if retry_usage:
-                    _accumulate_usage(total_usage, retry_usage)
-                if analysis.get("parse_error"):
-                    log(f"  [X] 재시도도 실패")
 
             analysis["chart_path"] = str(chart_path)
             analysis["yf_ticker"] = yf_ticker
@@ -1269,8 +1390,18 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             log(f"  [X] 오류: {e}")
             errors.append(error_msg)
 
-    # A등급 필터 및 정렬 (A-1 우선, A-2 다음, confidence 내림차순)
-    a_rated = [r for r in results if r.get("grade", "").startswith("A")]
+    # A등급 필터 + threshold 적용 (합의 일치 + 확신도 기준)
+    a_candidates = [r for r in results if r.get("grade", "").startswith("A")]
+    a_rated = []
+    for r in a_candidates:
+        cc = r.get("consensus_count", "")
+        agreement = int(cc.split("/")[0]) if "/" in cc else 0
+        conf = r.get("consensus_confidence", r.get("confidence", 0))
+        if agreement >= MIN_CONSENSUS_AGREEMENT and conf >= CONFIDENCE_THRESHOLD:
+            a_rated.append(r)
+        else:
+            log(f"  [FILTERED] {r.get('ticker_name', '')} {r.get('grade', '')} "
+                f"탈락: 확신도={conf}%, 합의={cc}")
     a_rated.sort(key=lambda x: (0 if x.get("grade") == "A-1" else 1, -x.get("confidence", 0)))
 
     # 요약
@@ -1287,8 +1418,10 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
     if a_rated:
         log(f"\n[선정] A-1/A-2 종목 (매력도순):")
         for idx, r in enumerate(a_rated, 1):
+            conf = r.get("consensus_confidence", r.get("confidence", 0))
+            cc = r.get("consensus_count", "")
             log(f"  {idx}. [{r.get('grade', '')}] {r.get('ticker_name', r.get('ticker', ''))} "
-                f"(신뢰도 {r.get('reliability', '')}) - "
+                f"(확신도 {conf}%, {cc}) - "
                 f"{r.get('reasoning', '')[:60]}...")
 
     # 결과 저장

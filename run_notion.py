@@ -24,14 +24,16 @@ RESULTS_JSON = engine.BASE_DIR / "results" / "latest_results.json"
 
 
 def _format_stock_list(results):
-    """A-1 또는 A-2 결과를 '종목명(티커) 종가원, ...' 형식으로 변환."""
+    """A-1 또는 A-2 결과를 '종목명(티커) 종가원 [확신도%], ...' 형식으로 변환."""
     parts = []
     for r in results:
         price = r.get("last_close")
+        conf = r.get("consensus_confidence", r.get("confidence", 0))
+        base = f"{r['ticker_name']}({r.get('code', '')})"
         if price:
-            parts.append(f"{r['ticker_name']}({r.get('code', '')}) {price:,}원")
-        else:
-            parts.append(f"{r['ticker_name']}({r.get('code', '')})")
+            base += f" {price:,}원"
+        base += f" [{conf}%]"
+        parts.append(base)
     return ", ".join(parts)
 
 
@@ -96,7 +98,7 @@ def _run_analysis(list_name, provider, notion, log):
             continue
 
         try:
-            result = engine.analyze_chart_with_llm(
+            result = engine.analyze_with_consensus(
                 chart_image_path=str(chart_path),
                 ticker_name=name,
                 provider=provider,
@@ -108,9 +110,11 @@ def _run_analysis(list_name, provider, notion, log):
             result["last_close"] = int(df["Close"].iloc[-1])
 
             grade = result.get("grade", "N/A")
-            reliability = result.get("reliability", "")
+            conf = result.get("consensus_confidence", result.get("confidence", 0))
             consensus_count = result.get("consensus_count", "")
-            log(f"  [분석] {grade} (신뢰도: {reliability}, {consensus_count})")
+            grade_dist = result.get("grade_distribution", {})
+            dist_str = " / ".join(f"{g}:{c}" for g, c in sorted(grade_dist.items()))
+            log(f"  [분석] {grade} (확신도: {conf}%, {consensus_count}, 분포: {dist_str})")
 
             usage = result.get("token_usage", {})
             if usage:
@@ -118,8 +122,17 @@ def _run_analysis(list_name, provider, notion, log):
             total_analyzed += 1
 
             if grade in ("A-1", "A-2"):
-                a_results.append(result)
-                log(f"  *** {grade} 선정 ***")
+                # threshold 필터링
+                agreement = int(consensus_count.split("/")[0]) if "/" in consensus_count else 0
+                threshold = engine.CONFIDENCE_THRESHOLD
+                min_agree = engine.MIN_CONSENSUS_AGREEMENT
+
+                if agreement >= min_agree and conf >= threshold:
+                    a_results.append(result)
+                    log(f"  *** {grade} 선정 (확신도: {conf}%, {consensus_count}) ***")
+                else:
+                    log(f"  [FILTERED] {grade} 탈락: 확신도={conf}%, 합의={consensus_count} "
+                        f"(기준: >={threshold}%, >={min_agree}회 일치)")
 
         except Exception as e:
             log(f"  [X] {name} 분석 오류: {e}")
@@ -179,6 +192,7 @@ def _run_report(notion, github_repo, log):
         meta = {
             "total_analyzed": total_analyzed,
             "a_count": len(a_results),
+            "consensus_runs": engine.CONSENSUS_RUNS,
             "errors": total_errors,
             "provider": provider,
             "cost_usd": cost,

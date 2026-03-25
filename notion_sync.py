@@ -42,18 +42,26 @@ class NotionSync:
         self._last = time.time()
 
     def _post(self, path, body=None):
-        """Notion API POST 요청."""
-        self._throttle()
-        resp = httpx.post(
-            f"{NOTION_BASE}/{path}",
-            headers=self._headers,
-            json=body or {},
-            timeout=30,
-        )
-        if resp.status_code >= 400:
-            logger.error(f"Notion API 오류: {resp.status_code} {resp.text}")
-        resp.raise_for_status()
-        return resp.json()
+        """Notion API POST 요청 (429/5xx 자동 재시도)."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            self._throttle()
+            resp = httpx.post(
+                f"{NOTION_BASE}/{path}",
+                headers=self._headers,
+                json=body or {},
+                timeout=None,
+            )
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt < max_retries - 1:
+                    retry_after = int(resp.headers.get("Retry-After", 2 ** attempt * 5))
+                    logger.warning(f"Notion API {resp.status_code}, retrying in {retry_after}s (attempt {attempt+1})")
+                    time.sleep(retry_after)
+                    continue
+            if resp.status_code >= 400:
+                logger.error(f"Notion API 오류: {resp.status_code} {resp.text}")
+            resp.raise_for_status()
+            return resp.json()
 
     def _get_db_schema(self, db_id):
         """DB 속성 이름 목록 조회."""
@@ -61,7 +69,7 @@ class NotionSync:
         resp = httpx.get(
             f"{NOTION_BASE}/databases/{db_id}",
             headers=self._headers,
-            timeout=30,
+            timeout=None,
         )
         if resp.status_code >= 400:
             logger.warning(f"DB 스키마 조회 실패: {resp.status_code}")
@@ -185,9 +193,10 @@ class NotionSync:
         cost = meta.get("cost_usd", 0)
 
         data_basis = meta.get("data_basis", "")
+        consensus_runs = meta.get("consensus_runs", 3)
         blocks.append(self._callout(
             f"분석 종목: {total}개 | 선정: {selected}개 | "
-            f"LLM: {provider.upper()} | 비용: ${cost:.4f}"
+            f"LLM: {provider.upper()} | 합의: {consensus_runs}회 | 비용: ${cost:.4f}"
         ))
         if data_basis:
             blocks.append(self._paragraph(data_basis))
@@ -207,7 +216,18 @@ class NotionSync:
             for idx, r in enumerate(grade_results, 1):
                 name = r.get("ticker_name", "")
                 code = r.get("code", "")
-                blocks.append(self._heading3(f"{idx}. {name} ({code})"))
+                conf = r.get("consensus_confidence", r.get("confidence", 0))
+                consensus = r.get("consensus_count", "")
+                conf_str = f"확신도 {conf}%"
+                if consensus:
+                    conf_str += f", {consensus} 일치"
+                blocks.append(self._heading3(f"{idx}. {name} ({code}) - {conf_str}"))
+
+                # 등급 분포 (만장일치 아닌 경우)
+                grade_dist = r.get("grade_distribution", {})
+                if len(grade_dist) > 1:
+                    dist_str = " / ".join(f"{g}: {c}회" for g, c in sorted(grade_dist.items()))
+                    blocks.append(self._bulleted(f"등급 분포: {dist_str}"))
 
                 # 차트 이미지
                 chart_url = self._chart_url(name, github_repo)
