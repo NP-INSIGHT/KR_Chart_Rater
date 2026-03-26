@@ -984,17 +984,10 @@ def generate_chart(ticker_name, df, code=None, market=None):
 # LLM 차트 분석
 # ============================================================
 def load_chart_prompt():
-    """프롬프트 파일 로드. config의 CHART_PROMPT_FILE 설정 또는 기본 chart_prompt.txt."""
-    prompt_file = CONFIG.get("CHART_PROMPT_FILE", "chart_prompt.txt")
-    prompt_path = BASE_DIR / prompt_file
+    """chart_prompt.txt 로드"""
+    prompt_path = BASE_DIR / "chart_prompt.txt"
     if not prompt_path.exists():
-        # prompts/ 디렉토리에서도 탐색
-        alt_path = BASE_DIR / "prompts" / prompt_file
-        if alt_path.exists():
-            prompt_path = alt_path
-        else:
-            raise FileNotFoundError(f"프롬프트 파일을 찾을 수 없습니다: {prompt_path}")
-    logger.info(f"프롬프트 파일: {prompt_path.name}")
+        raise FileNotFoundError(f"프롬프트 파일을 찾을 수 없습니다: {prompt_path}")
     return prompt_path.read_text(encoding="utf-8")
 
 
@@ -1219,18 +1212,12 @@ def _analyze_with_gemini(image_b64, system_prompt, user_msg):
 
 
 def _parse_llm_response(raw_text):
-    """LLM 응답 파싱 (v3/v4 프롬프트 모두 호환)"""
+    """LLM 응답 파싱 (v4 프롬프트 기준)"""
     result = {"raw_response": raw_text, "parse_error": False}
-
-    # <분석_추론> 블록이 있으면 그 이후만 파싱 (v3 호환)
-    # v4 프롬프트는 CoT 태그 없음 → 전체 텍스트 대상
     final_text = raw_text
-    cot_end = raw_text.find("</분석_추론>")
-    if cot_end != -1:
-        final_text = raw_text[cot_end:]
 
-    # 1. 결론 (매력도): "■ 결론: A-1" / "결론: A-1" 모두 호환
-    m = re.search(r"(?:■\s*)?결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*(?:분류)?\s*\(?[^)]*\)?\s*)?([A-Da-d]-?[12]?)\b", final_text)
+    # 1. 결론 (매력도): "결론: A-1" / "결론: 매력도 분류 A-1" 등
+    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*(?:분류)?\s*\(?[^)]*\)?\s*)?([A-Da-d]-?[12]?)\b", final_text)
     if m:
         grade_raw = m.group(1).upper()
         if grade_raw in ("A1", "A2"):
@@ -1241,22 +1228,22 @@ def _parse_llm_response(raw_text):
         result["parse_error"] = True
         logger.error(f"등급 파싱 실패. 원본 응답:\n{raw_text[:500]}")
 
-    # 2. 결론 일치 횟수: "3회 중 2회 일치" / "3/3" 등 다양한 형식
+    # 2. 결론 일치 횟수: "3회 중 2회 일치", "3회 중 3회", "2/3" 등
     m_cc = re.search(r"(?:결론\s*)?일치\s*횟수\s*[:：]?\s*(\d)\s*(?:회\s*)?(?:중|/)\s*(\d)\s*(?:회)?\s*(?:일치)?", final_text)
     if m_cc:
         result["consensus_count"] = f"{m_cc.group(2)}/{m_cc.group(1)}"
     else:
         result["consensus_count"] = ""
 
-    # 3. 신뢰도: 숫자 % 우선 파싱, 기존 상/중/하 폴백
-    m_pct = re.search(r"(?:■\s*)?신뢰도\s*[:：]\s*(\d{1,3})\s*%", final_text)
+    # 3. 신뢰도: 숫자% 또는 상/중/하
+    m_pct = re.search(r"신뢰도\s*(?:등급\s*)?[:：]\s*(\d{1,3})\s*%", final_text)
     if m_pct:
         result["confidence"] = min(int(m_pct.group(1)), 100)
         pct = result["confidence"]
         result["reliability"] = "High" if pct >= 80 else "Medium" if pct >= 60 else "Low"
     else:
         m = re.search(
-            r"(?:■\s*)?신뢰도\s*(?:등급\s*)?[:：]\s*(상|중|하|High|Medium|Low|높음|보통|낮음)",
+            r"신뢰도\s*(?:등급\s*)?[:：]\s*(상|중|하|높음|보통|낮음|High|Medium|Low)",
             final_text, re.IGNORECASE
         )
         if m:
@@ -1266,57 +1253,36 @@ def _parse_llm_response(raw_text):
                        "high": "High", "medium": "Medium", "low": "Low"}
             result["reliability"] = rel_map.get(rel_raw, rel_raw.capitalize())
         else:
-            result["reliability"] = ""
+            # v4 프롬프트에서 신뢰도 미출력 시 기본값
+            result["reliability"] = "Medium"
 
-    # 3-1. 등급 확률: "■ 등급 확률: A-1 70% / A-2 30%" (v3 전용, v4에서는 없음)
-    m_prob = re.search(r"(?:■\s*)?등급\s*확률\s*[:：]\s*(.+)", final_text)
-    if m_prob:
-        prob_text = m_prob.group(1)
-        probs = re.findall(r"([A-Da-d]-?[12]?)\s+(\d{1,3})%", prob_text)
-        result["grade_probabilities"] = {g.upper(): int(p) for g, p in probs}
-    else:
-        result["grade_probabilities"] = {}
-
-    # 4. 핵심 근거: 다양한 형식 호환
+    # 4. 핵심 근거
     m = re.search(
-        r"(?:■\s*)?핵심\s*근거\s*[:：]?\s*\n?(.*?)(?=\n\s*■|\n\s*\d+\.\s*현재|\Z)",
+        r"핵심\s*근거\s*[:：]?\s*\n?(.*?)(?=\n\s*\d+\.\s*현재|\Z)",
         final_text, re.DOTALL
     )
     result["reasoning"] = m.group(1).strip() if m else ""
 
     # 5. A-1/A-2 전용 필드
     if result["grade"] in ("A-1", "A-2"):
-        # 현재 위치: "■ 현재 위치:" 형식 (기존 "현재가:" 포맷도 호환)
-        m = re.search(r"(?:■\s*)?현재\s*(?:위치|가)\s*[:：]\s*(.+)", final_text)
+        m = re.search(r"현재\s*(?:위치|가)\s*[:：]\s*(.+)", final_text)
         result["current_price"] = m.group(1).strip() if m else ""
 
-        # 1차 목표가 (기존 "목표가:" 포맷도 호환)
-        m = re.search(r"1차\s*목표가\s*[:：]\s*(.+)", final_text)
-        if not m:
-            m = re.search(r"목표가\s*[:：]\s*(.+)", final_text)
+        m = re.search(r"목표가\s*[:：]\s*(.+)", final_text)
         result["target_price"] = m.group(1).strip() if m else ""
 
-        # 2차 목표가
-        m = re.search(r"2차\s*목표가\s*[:：]\s*(.+)", final_text)
-        result["target_price_2"] = m.group(1).strip() if m else ""
-
-        # 진입 관점 (기존 "매수 전략:" 포맷도 호환)
-        m = re.search(r"진입\s*관점\s*[:：]\s*(.+)", final_text)
-        if not m:
-            m = re.search(r"매수\s*전략\s*[:：]\s*(.+)", final_text)
+        m = re.search(r"매수\s*전략\s*[:：]\s*(.+)", final_text)
         result["buy_strategy"] = m.group(1).strip() if m else ""
 
-        # 관리(리스크) 기준 (기존 "매도 전략:" 포맷도 호환)
-        m = re.search(r"관리\s*\(리스크\)\s*기준\s*[:：]\s*(.+)", final_text)
-        if not m:
-            m = re.search(r"매도\s*전략\s*[:：]\s*(.+)", final_text)
+        m = re.search(r"매도\s*전략\s*[:：]\s*(.+)", final_text)
         result["sell_strategy"] = m.group(1).strip() if m else ""
 
-    # reliability → confidence 숫자 변환 (숫자 % 파싱이 안 된 경우에만 폴백)
+    # reliability → confidence 숫자 변환
     if "confidence" not in result:
         confidence_map = {"High": 90, "Medium": 70, "Low": 50}
-        result["confidence"] = confidence_map.get(result.get("reliability", ""), 0)
+        result["confidence"] = confidence_map.get(result.get("reliability", ""), 70)
 
+    result["grade_probabilities"] = {}
     return result
 
 
