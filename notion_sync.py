@@ -216,9 +216,9 @@ class NotionSync:
             for idx, r in enumerate(grade_results, 1):
                 name = r.get("ticker_name", "")
                 code = r.get("code", "")
-                conf = r.get("consensus_confidence", r.get("confidence", 0))
+                reliability = r.get("reliability", "")
                 consensus = r.get("consensus_count", "")
-                conf_str = f"확신도 {conf}%"
+                conf_str = f"신뢰도: {reliability}"
                 if consensus:
                     conf_str += f", {consensus} 일치"
                 blocks.append(self._heading3(f"{idx}. {name} ({code}) - {conf_str}"))

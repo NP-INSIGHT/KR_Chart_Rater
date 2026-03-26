@@ -1084,7 +1084,8 @@ def analyze_with_consensus(chart_image_path, ticker_name, provider=None, last_cl
             runs.append(result)
             grade = result.get("grade", "N/A")
             conf = result.get("confidence", 0)
-            logger.info(f"  [run {i+1}/{n_runs}] {grade} (확신도: {conf}%)")
+            reliability = result.get("reliability", "")
+            logger.info(f"  [run {i+1}/{n_runs}] {grade} (신뢰도: {reliability})")
             usage = result.get("token_usage", {})
             for key in accumulated_usage:
                 accumulated_usage[key] += usage.get(key, 0)
@@ -1342,7 +1343,7 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             analysis = analyze_with_consensus(chart_path, name, provider, last_close=last_close_val)
             elapsed = time.time() - start_time
             usage = analysis.get("token_usage", {})
-            conf = analysis.get("consensus_confidence", analysis.get("confidence", 0))
+            reliability = analysis.get("reliability", "")
             consensus_count = analysis.get("consensus_count", "")
             grade_dist = analysis.get("grade_distribution", {})
             dist_str = " / ".join(f"{g}:{c}" for g, c in sorted(grade_dist.items()))
@@ -1352,7 +1353,7 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
                 cost_str = f" | ${cost_usd:.4f} ({cost_krw:.0f}원)"
             else:
                 cost_str = ""
-            log(f"  [분석] {analysis.get('grade', 'N/A')} | 확신도: {conf}% | {consensus_count} | 분포: {dist_str}{cost_str}")
+            log(f"  [분석] {analysis.get('grade', 'N/A')} | 신뢰도: {reliability} | {consensus_count} | 분포: {dist_str}{cost_str}")
             if usage:
                 _accumulate_usage(total_usage, usage)
                 cum_usd = total_usage["total_cost_usd"]
@@ -1372,7 +1373,7 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             log(f"  [X] 오류: {e}")
             errors.append(error_msg)
 
-    # A등급 필터 + threshold 적용 (합의 일치 + 확신도 기준)
+    # A등급 필터 + threshold 적용 (합의 일치 + 신뢰도 기준)
     a_candidates = [r for r in results if r.get("grade", "").startswith("A")]
     a_rated = []
     for r in a_candidates:
@@ -1383,7 +1384,7 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
             a_rated.append(r)
         else:
             log(f"  [FILTERED] {r.get('ticker_name', '')} {r.get('grade', '')} "
-                f"탈락: 확신도={conf}%, 합의={cc}")
+                f"탈락: 신뢰도={r.get('reliability', '')}, 합의={cc}")
     a_rated.sort(key=lambda x: (0 if x.get("grade") == "A-1" else 1, -x.get("confidence", 0)))
 
     # 요약
@@ -1400,10 +1401,10 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
     if a_rated:
         log(f"\n[선정] A-1/A-2 종목 (매력도순):")
         for idx, r in enumerate(a_rated, 1):
-            conf = r.get("consensus_confidence", r.get("confidence", 0))
+            rel = r.get("reliability", "")
             cc = r.get("consensus_count", "")
             log(f"  {idx}. [{r.get('grade', '')}] {r.get('ticker_name', r.get('ticker', ''))} "
-                f"(확신도 {conf}%, {cc}) - "
+                f"(신뢰도: {rel}, {cc}) - "
                 f"{r.get('reasoning', '')[:60]}...")
 
     # 결과 저장
