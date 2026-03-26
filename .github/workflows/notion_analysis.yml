@@ -48,7 +48,7 @@ jobs:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
         run: |
           LIST="${{ inputs.list }}"
-          PROVIDER="${{ inputs.provider || 'claude' }}"
+          PROVIDER="${{ inputs.provider || 'gemini' }}"
           if [ -n "$LIST" ]; then
             python run_notion.py --provider "$PROVIDER" --list "$LIST" --dry-run
           else
@@ -71,7 +71,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           LIST="${{ inputs.list }}"
-          PROVIDER="${{ inputs.provider || 'claude' }}"
+          PROVIDER="${{ inputs.provider || 'gemini' }}"
           if [ -n "$LIST" ]; then
             python run_notion.py --provider "$PROVIDER" --list "$LIST" --report-only
           else
