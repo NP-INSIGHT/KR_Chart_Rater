@@ -9,6 +9,10 @@ CLAUDE_MODEL=claude-sonnet-4-6
 # Gemini 모델 (gemini-2.5-flash / gemini-2.5-pro)
 GEMINI_MODEL=gemini-3.1-pro-preview
 
+# 프롬프트 파일 (prompts/ 디렉토리 또는 루트에서 탐색)
+# chart_prompt.txt = v4 (현재), prompts/chart_prompt_v2.txt = v2 (이전)
+CHART_PROMPT_FILE=chart_prompt.txt
+
 # 차트 설정
 CHART_PERIOD=1y
 CHART_MA_LINES=5,20,60,120
