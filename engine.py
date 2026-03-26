@@ -1217,8 +1217,8 @@ def _parse_llm_response(raw_text):
     result = {"raw_response": raw_text, "parse_error": False}
     final_text = raw_text
 
-    # 1. 결론 (매력도): "결론: A-1" / "결론: 매력도 분류 A-1" 등
-    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:매력도\s*(?:분류)?\s*\(?[^)]*\)?\s*)?([A-Da-d]-?[12]?)\b", final_text)
+    # 1. 결론 (매력도): "결론: A-1" / "결론: 매력도 분류 A-1" / "결론: 완만추세 지속형 매력 A-2" 등
+    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:.*?\s)?([A-Da-d]-?[12]?)\b", final_text)
     if m:
         grade_raw = m.group(1).upper()
         if grade_raw in ("A1", "A2"):
