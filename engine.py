@@ -1223,6 +1223,10 @@ def _parse_llm_response(raw_text):
         grade_raw = m.group(1).upper()
         if grade_raw in ("A1", "A2"):
             grade_raw = grade_raw[0] + "-" + grade_raw[1]
+        # plain "A" → A-2 기본 처리 (LLM이 A-1/A-2 구분 없이 "A"만 출력한 경우)
+        if grade_raw == "A":
+            logger.warning("LLM이 'A'만 출력 → A-2로 기본 처리 (보수적 판단)")
+            grade_raw = "A-2"
         result["grade"] = grade_raw
     else:
         result["grade"] = "N/A"
