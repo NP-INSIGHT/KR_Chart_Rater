@@ -929,8 +929,8 @@ def generate_chart(ticker_name, df, code=None, market=None):
     if code:
         title_str += f" ({code})"
 
-    # MA 색상: 5일(빨강), 20일(노랑), 60일(초록), 120일(회색)
-    ma_colors = ["#FF3333", "#FFD700", "#33CC33", "#888888"]
+    # MA 색상: 5일(보라), 20일(노랑), 60일(초록), 120일(자주)
+    ma_colors = ["#9C27B0", "#FFD700", "#33CC33", "#880E4F"]
 
     # 유효한 MA만 사용 (데이터 길이보다 긴 MA는 제외)
     valid_ma = [m for m in CHART_MA_LINES if m < len(df)]
@@ -1029,14 +1029,14 @@ def analyze_chart_with_llm(chart_image_path, ticker_name, provider=None, last_cl
     system_prompt = load_chart_prompt()
 
     # 차트 설명 메시지 (이평선 색상은 generate_chart()의 ma_colors와 동기화)
-    # ma_colors = ["#FF3333", "#FFD700", "#33CC33", "#888888"] → 빨강/노랑/초록/회색
+    # ma_colors = ["#9C27B0", "#FFD700", "#33CC33", "#880E4F"] → 보라/노랑/초록/자주
     if last_close is not None:
         user_msg = (
             f"현재가: {int(last_close):,}원 부근. "
-            "빨간선=5일선, 노란선=20일선, 초록선=60일선, 회색선=120일선이야. 분석 시작해."
+            "보라선=5일선, 노란선=20일선, 초록선=60일선, 자주선=120일선이야. 분석 시작해."
         )
     else:
-        user_msg = "빨간선=5일선, 노란선=20일선, 초록선=60일선, 회색선=120일선이야. 분석 시작해."
+        user_msg = "보라선=5일선, 노란선=20일선, 초록선=60일선, 자주선=120일선이야. 분석 시작해."
 
     # 이미지 읽기
     image_bytes = Path(chart_image_path).read_bytes()
@@ -1218,12 +1218,12 @@ def _parse_llm_response(raw_text):
     final_text = raw_text
 
     # 1. 결론 (매력도): "결론: A-1" / "결론: 매력도 분류 A-1" / "결론: 완만추세 지속형 매력 A-2" 등
-    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:.*?\s)?([A-Da-d]-?[12]?)\b", final_text)
+    m = re.search(r"결론\s*[:：]\s*\*{0,2}\s*(?:.*?\s)?([A-Da-d]-?[123]?)\b", final_text)
     if m:
         grade_raw = m.group(1).upper()
-        if grade_raw in ("A1", "A2"):
+        if grade_raw in ("A1", "A2", "A3"):
             grade_raw = grade_raw[0] + "-" + grade_raw[1]
-        # plain "A" → A-2 기본 처리 (LLM이 A-1/A-2 구분 없이 "A"만 출력한 경우)
+        # plain "A" → A-2 기본 처리 (LLM이 A-1/A-2/A-3 구분 없이 "A"만 출력한 경우)
         if grade_raw == "A":
             logger.warning("LLM이 'A'만 출력 → A-2로 기본 처리 (보수적 판단)")
             grade_raw = "A-2"
@@ -1268,8 +1268,8 @@ def _parse_llm_response(raw_text):
     )
     result["reasoning"] = m.group(1).strip() if m else ""
 
-    # 5. A-1/A-2 전용 필드
-    if result["grade"] in ("A-1", "A-2"):
+    # 5. A-1/A-2/A-3 전용 필드
+    if result["grade"] in ("A-1", "A-2", "A-3"):
         m = re.search(r"현재\s*(?:위치|가)\s*[:：]\s*(.+)", final_text)
         result["current_price"] = m.group(1).strip() if m else ""
 
@@ -1389,11 +1389,11 @@ def run_stock_analysis(ticker_names, provider=None, log_callback=None):
         else:
             log(f"  [FILTERED] {r.get('ticker_name', '')} {r.get('grade', '')} "
                 f"탈락: 신뢰도={r.get('reliability', '')}, 합의={cc}")
-    a_rated.sort(key=lambda x: (0 if x.get("grade") == "A-1" else 1, -x.get("confidence", 0)))
+    a_rated.sort(key=lambda x: ({"A-1": 0, "A-2": 1, "A-3": 2}.get(x.get("grade"), 3), -x.get("confidence", 0)))
 
     # 요약
     log(f"\n{'='*60}")
-    log(f"[완료] {len(results)}/{total} 분석 | A-1/A-2 선정: {len(a_rated)}개 | 오류: {len(errors)}개")
+    log(f"[완료] {len(results)}/{total} 분석 | A-1/A-2/A-3 선정: {len(a_rated)}개 | 오류: {len(errors)}개")
     if total_usage["api_calls"] > 0:
         cost_usd = total_usage["total_cost_usd"]
         cost_krw = cost_usd * 1400  # 근사 환율
@@ -1575,7 +1575,7 @@ def run_theme_analysis(theme_names=None, top_n=None, provider=None, log_callback
     # 전체 요약
     total_a = sum(len(t.get("a_rated", [])) for t in theme_results)
     log(f"\n{'='*60}")
-    log(f"[테마 분석 완료] {len(theme_results)}개 테마 | 전체 A-1/A-2 선정: {total_a}개")
+    log(f"[테마 분석 완료] {len(theme_results)}개 테마 | 전체 A-1/A-2/A-3 선정: {total_a}개")
     log(f"{'='*60}")
 
     for tr in theme_results:
@@ -1620,6 +1620,7 @@ def save_results_json(data, prefix="analysis"):
 _GRADE_COLORS = {
     "A-1": (220, 38, 38),    # 빨강 (속도형 매력)
     "A-2": (234, 88, 12),    # 주황 (완만추세형)
+    "A-3": (30, 136, 229),   # 파랑 (초기 세력형)
     "B":   (202, 138, 4),    # 노랑
     "C":   (107, 114, 128),  # 회색
     "D":   (128, 128, 128),  # 진회색
@@ -1756,7 +1757,7 @@ def save_results_docx(data, prefix="analysis"):
         total = data.get("total_analyzed", len(results))
         errors = data.get("total_errors", 0)
         p = doc.add_paragraph()
-        p.add_run(f"분석 종목: {total}개  |  오류: {errors}개  |  A-1/A-2 선정: {len(a_rated)}개")
+        p.add_run(f"분석 종목: {total}개  |  오류: {errors}개  |  A-1/A-2/A-3 선정: {len(a_rated)}개")
 
         if results:
             _write_summary_table(doc, results, _set_cell_shading, _grade_run)
@@ -1775,7 +1776,7 @@ def save_results_docx(data, prefix="analysis"):
 
         doc.add_heading("분석 요약", level=2)
         p = doc.add_paragraph()
-        p.add_run(f"테마 수: {len(theme_results)}개  |  전체 A-1/A-2 선정: {total_a}개")
+        p.add_run(f"테마 수: {len(theme_results)}개  |  전체 A-1/A-2/A-3 선정: {total_a}개")
 
         for t_idx, theme_data in enumerate(theme_results, 1):
             theme_name = theme_data.get("theme", f"테마 {t_idx}")
@@ -1989,19 +1990,19 @@ def build_email_body(result, provider):
         f"분석일: {date_str}",
         f"LLM: {provider.upper()}",
         "",
-        f"분석 종목: {total}개 | 오류: {errors}개 | A-1/A-2 선정: {len(a_rated)}개",
+        f"분석 종목: {total}개 | 오류: {errors}개 | A-1/A-2/A-3 선정: {len(a_rated)}개",
         "",
     ]
 
     if a_rated:
-        lines.append("A-1/A-2 선정 종목:")
+        lines.append("A-1/A-2/A-3 선정 종목:")
         for idx, r in enumerate(a_rated, 1):
             name = r.get("ticker_name", "")
             grade = r.get("grade", "")
             reliability = r.get("reliability", "")
             lines.append(f"  {idx}. [{grade}] {name} (신뢰도: {reliability})")
     else:
-        lines.append("A-1/A-2 선정 종목 없음")
+        lines.append("A-1/A-2/A-3 선정 종목 없음")
 
     usage = result.get("token_usage", {})
     if usage.get("api_calls", 0) > 0:

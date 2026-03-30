@@ -147,6 +147,7 @@ class NotionSync:
             "리스트": lambda v: {"rich_text": [{"text": {"content": str(v)}}]},
             "A-1": lambda v: {"rich_text": [{"text": {"content": str(v)[:2000]}}]},
             "A-2": lambda v: {"rich_text": [{"text": {"content": str(v)[:2000]}}]},
+            "A-3": lambda v: {"rich_text": [{"text": {"content": str(v)[:2000]}}]},
         }
 
         for key, builder in prop_map.items():
@@ -202,14 +203,15 @@ class NotionSync:
             blocks.append(self._paragraph(data_basis))
 
         if not a_results:
-            blocks.append(self._paragraph("A-1/A-2 선정 종목 없음"))
+            blocks.append(self._paragraph("A-1/A-2/A-3 선정 종목 없음"))
             return blocks
 
-        # A-1 / A-2 분리
+        # A-1 / A-2 / A-3 분리
         a1 = [r for r in a_results if r.get("grade") == "A-1"]
         a2 = [r for r in a_results if r.get("grade") == "A-2"]
+        a3 = [r for r in a_results if r.get("grade") == "A-3"]
 
-        for grade_label, grade_results in [("A-1 (속도형 매력)", a1), ("A-2 (완만추세 지속형)", a2)]:
+        for grade_label, grade_results in [("A-1 (속도형 매력)", a1), ("A-2 (완만추세 지속형)", a2), ("A-3 (초기 세력형)", a3)]:
             if not grade_results:
                 continue
             blocks.append(self._heading3(grade_label))

@@ -121,7 +121,7 @@ def _run_analysis(list_name, provider, notion, log):
                 engine._accumulate_usage(total_usage, usage)
             total_analyzed += 1
 
-            if grade in ("A-1", "A-2"):
+            if grade in ("A-1", "A-2", "A-3"):
                 # threshold 필터링
                 conf = result.get("consensus_confidence", result.get("confidence", 0))
                 agreement = int(consensus_count.split("/")[0]) if "/" in consensus_count else 0
@@ -139,17 +139,17 @@ def _run_analysis(list_name, provider, notion, log):
             log(f"  [X] {name} 분석 오류: {e}")
             total_errors += 1
 
-    # A-1 우선, A-2 다음, confidence 내림차순 정렬
-    a_results.sort(key=lambda x: (0 if x.get("grade") == "A-1" else 1, -x.get("confidence", 0)))
+    # A-1 우선, A-2 다음, A-3 다음, confidence 내림차순 정렬
+    a_results.sort(key=lambda x: ({"A-1": 0, "A-2": 1, "A-3": 2}.get(x.get("grade"), 3), -x.get("confidence", 0)))
 
     cost = total_usage["total_cost_usd"]
     log(f"\n{'='*50}")
     log(f"분석 완료: {total_analyzed}개 분석, {total_errors}개 오류")
-    log(f"A-1/A-2 선정: {len(a_results)}개")
+    log(f"A-1/A-2/A-3 선정: {len(a_results)}개")
     log(f"비용: ${cost:.4f} (약 {cost*1400:.0f}원)")
 
     if a_results:
-        log("\nA-1/A-2 선정 종목:")
+        log("\nA-1/A-2/A-3 선정 종목:")
         for i, r in enumerate(a_results, 1):
             log(f"  {i}. [{r.get('grade', '')}] {r['ticker_name']} ({r.get('code', '')})")
 
@@ -179,8 +179,9 @@ def _run_report(notion, github_repo, log):
 
     a1_results = [r for r in a_results if r.get("grade") == "A-1"]
     a2_results = [r for r in a_results if r.get("grade") == "A-2"]
+    a3_results = [r for r in a_results if r.get("grade") == "A-3"]
 
-    log(f"Notion 보고서 작성 중... (A-1: {len(a1_results)}개, A-2: {len(a2_results)}개)")
+    log(f"Notion 보고서 작성 중... (A-1: {len(a1_results)}개, A-2: {len(a2_results)}개, A-3: {len(a3_results)}개)")
 
     try:
         dt = datetime.now(engine.KST)
@@ -207,6 +208,7 @@ def _run_report(notion, github_repo, log):
             "비용": round(cost, 4),
             "A-1": _format_stock_list(a1_results),
             "A-2": _format_stock_list(a2_results),
+            "A-3": _format_stock_list(a3_results),
         }
         blocks = notion.build_report_blocks(a_results, meta, github_repo)
         notion.create_report_page(notion_rp_db, title, dt.strftime("%Y-%m-%d"), summary_props, blocks)

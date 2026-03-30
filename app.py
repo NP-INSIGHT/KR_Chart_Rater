@@ -508,7 +508,7 @@ class App(ctk.CTk):
             cost_usd = usage["total_cost_usd"]
             cost_krw = cost_usd * 1400
             cost_str = f" | 비용: ${cost_usd:.4f} ({cost_krw:.0f}원)"
-        self.stock_status.configure(text=f"완료: {total}개 분석 | A-1/A-2 선정: {a_count}개 | 오류: {errors}개{cost_str}")
+        self.stock_status.configure(text=f"완료: {total}개 분석 | A-1/A-2/A-3 선정: {a_count}개 | 오류: {errors}개{cost_str}")
 
         # Word 내보내기 / 메일 발송 활성화
         self._last_stock_result = result
@@ -532,7 +532,7 @@ class App(ctk.CTk):
             return
 
         # A-1 우선, A-2 다음, 나머지 등급 순
-        grade_order = {"A-1": 0, "A-2": 1, "B": 2, "C": 3, "D": 4, "N/A": 5}
+        grade_order = {"A-1": 0, "A-2": 1, "A-3": 2, "B": 3, "C": 4, "D": 5, "N/A": 6}
         all_results.sort(key=lambda x: (grade_order.get(x.get("grade", "N/A"), 5), -x.get("confidence", 0)))
 
         for r in all_results:
@@ -541,7 +541,7 @@ class App(ctk.CTk):
     def _create_result_card(self, parent, r):
         """개별 종목 결과 카드 생성 (차트 이미지 + 분석 결과)"""
         grade = r.get("grade", "N/A")
-        grade_colors = {"A-1": "#C62828", "A-2": "#E65100", "B": "#1565C0", "C": "#757575", "D": "#9E9E9E", "N/A": "#9E9E9E"}
+        grade_colors = {"A-1": "#C62828", "A-2": "#E65100", "A-3": "#1E88E5", "B": "#1565C0", "C": "#757575", "D": "#9E9E9E", "N/A": "#9E9E9E"}
         color = grade_colors.get(grade, "#9E9E9E")
 
         card = ctk.CTkFrame(parent, fg_color=ACCENT_LIGHT, corner_radius=8)
@@ -1023,7 +1023,7 @@ class App(ctk.CTk):
 
         themes = result.get("themes", [])
         total_a = sum(len(t.get("a_rated", [])) for t in themes)
-        self.theme_status.configure(text=f"완료: {len(themes)}개 테마 | 전체 A-1/A-2 선정: {total_a}개")
+        self.theme_status.configure(text=f"완료: {len(themes)}개 테마 | 전체 A-1/A-2/A-3 선정: {total_a}개")
 
         # Word 내보내기 활성화
         self._last_theme_result = result
@@ -1091,7 +1091,7 @@ class App(ctk.CTk):
                 continue
 
             # 등급별 종목 표시
-            grade_groups = {"A-1": [], "A-2": [], "B": [], "C": [], "D": [], "N/A": []}
+            grade_groups = {"A-1": [], "A-2": [], "A-3": [], "B": [], "C": [], "D": [], "N/A": []}
             for r in all_analyzed:
                 g = r.get("grade", "N/A")
                 name = r.get("ticker_name", r.get("ticker", ""))
@@ -1100,8 +1100,8 @@ class App(ctk.CTk):
                 else:
                     grade_groups["N/A"].append(name)
 
-            grade_colors = {"A-1": "#C62828", "A-2": "#E65100", "B": "#1565C0", "C": "#757575", "D": "#9E9E9E"}
-            for g in ["A-1", "A-2", "B", "C", "D"]:
+            grade_colors = {"A-1": "#C62828", "A-2": "#E65100", "A-3": "#1E88E5", "B": "#1565C0", "C": "#757575", "D": "#9E9E9E"}
+            for g in ["A-1", "A-2", "A-3", "B", "C", "D"]:
                 names = grade_groups[g]
                 if names:
                     ctk.CTkLabel(
@@ -1217,8 +1217,8 @@ class App(ctk.CTk):
         )
         self.result_subtab.pack(fill="both", expand=True)
 
-        # A-1/A-2 선정 종목 탭
-        a_tab = self.result_subtab.add("A-1/A-2 선정")
+        # A-1/A-2/A-3 선정 종목 탭
+        a_tab = self.result_subtab.add("A-1/A-2/A-3 선정")
         self.result_a_frame = ctk.CTkScrollableFrame(a_tab, fg_color="transparent")
         self.result_a_frame.pack(fill="both", expand=True)
 
@@ -1292,7 +1292,7 @@ class App(ctk.CTk):
         self.result_json_box.insert("1.0", json.dumps(data, ensure_ascii=False, indent=2))
         self.result_json_box.configure(state="disabled")
 
-        # A-1/A-2 선정 종목 표시
+        # A-1/A-2/A-3 선정 종목 표시
         for w in self.result_a_frame.winfo_children():
             w.destroy()
         for w in self.result_all_frame.winfo_children():
@@ -1314,7 +1314,7 @@ class App(ctk.CTk):
             all_results = []
             a_rated = []
 
-        # A-1/A-2 선정 탭
+        # A-1/A-2/A-3 선정 탭
         if a_rated:
             for idx, r in enumerate(a_rated, 1):
                 name = r.get("ticker_name", r.get("ticker", ""))
@@ -1332,7 +1332,7 @@ class App(ctk.CTk):
                 ).pack(anchor="w", pady=3, padx=5)
         else:
             ctk.CTkLabel(
-                self.result_a_frame, text="A-1/A-2 선정 종목 없음",
+                self.result_a_frame, text="A-1/A-2/A-3 선정 종목 없음",
                 text_color="gray",
             ).pack(pady=20)
 
